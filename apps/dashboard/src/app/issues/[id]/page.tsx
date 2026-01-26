@@ -570,7 +570,7 @@ function SituationTab({ situation, isLoading }: { situation: SituationModel; isL
                         loop.reinforcing ? "bg-red-900/50 text-red-300" :
                         "bg-blue-900/50 text-blue-300"
                       }`}>{loop.reinforcing ? "reinforcing" : "balancing"}</span>
-                      {loop.nodes.length > 0 && (
+                      {loop.nodes && loop.nodes.length > 0 && (
                         <span className="text-xs text-gray-500">{loop.nodes.join(" → ")}</span>
                       )}
                     </div>

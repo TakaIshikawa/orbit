@@ -135,7 +135,7 @@ export default function Home() {
         <div className="flex items-center gap-3 mb-4">
           <h2 className="text-xl font-semibold">Pipeline</h2>
           <span className="text-xs text-gray-500 bg-gray-800 px-2 py-1 rounded">
-            Scout → Analyze → Brief → Plan → Verify
+            Scout → Verify → Analyze → Brief → Plan
           </span>
         </div>
 
@@ -154,6 +154,14 @@ export default function Home() {
             />
             <PipelineStageCard
               step={2}
+              title="Verifications"
+              description="Claims validated"
+              href="/verifications"
+              count={pipelineStats.verifications}
+              color="cyan"
+            />
+            <PipelineStageCard
+              step={3}
               title="Issues"
               description="IUTLN scored"
               href="/issues"
@@ -161,7 +169,7 @@ export default function Home() {
               color="purple"
             />
             <PipelineStageCard
-              step={3}
+              step={4}
               title="Briefs"
               description="Problem analysis"
               href="/briefs"
@@ -169,20 +177,12 @@ export default function Home() {
               color="orange"
             />
             <PipelineStageCard
-              step={4}
+              step={5}
               title="Solutions"
               description="Proposed actions"
               href="/solutions"
               count={pipelineStats.solutions}
               color="green"
-            />
-            <PipelineStageCard
-              step={5}
-              title="Verifications"
-              description="Evidence checked"
-              href="/verifications"
-              count={pipelineStats.verifications}
-              color="cyan"
             />
           </div>
         </div>

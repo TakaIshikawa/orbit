@@ -55,11 +55,6 @@ export default function Home() {
     retry: 1,
   });
 
-  const { data: runsData } = useQuery({
-    queryKey: ["runs", { limit: 1 }],
-    queryFn: () => api.getRuns({ limit: 1 }),
-  });
-
   const { data: agentsData } = useQuery({
     queryKey: ["agents"],
     queryFn: () => api.getAgents(),
@@ -116,7 +111,6 @@ export default function Home() {
     sourcesError: sourceHealthError,
     feedbackPending: feedbackStats?.data?.pendingCount ?? 0,
     feedbackProcessed: feedbackStats?.data?.processedLast24h ?? 0,
-    runs: runsData?.meta?.total ?? 0,
     agents: agentsData?.data?.length ?? 0,
   };
 
@@ -132,11 +126,21 @@ export default function Home() {
 
       {/* Pipeline Section */}
       <section>
-        <div className="flex items-center gap-3 mb-4">
-          <h2 className="text-xl font-semibold">Pipeline</h2>
-          <span className="text-xs text-gray-500 bg-gray-800 px-2 py-1 rounded">
-            Scout → Verify → Analyze → Brief → Plan
-          </span>
+        <div className="flex items-center justify-between mb-4">
+          <div className="flex items-center gap-3">
+            <h2 className="text-xl font-semibold">Pipeline</h2>
+            <span className="text-xs text-gray-500 bg-gray-800 px-2 py-1 rounded">
+              Scout → Analyze → Brief → Verify → Plan
+            </span>
+          </div>
+          <Link
+            href="/playbooks"
+            className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 transition-colors"
+          >
+            <span>▶</span>
+            <span>Playbooks</span>
+            <span className="bg-blue-500 px-1.5 py-0.5 rounded text-xs">{automationStats.playbooks}</span>
+          </Link>
         </div>
 
         <div className="relative">
@@ -188,72 +192,48 @@ export default function Home() {
         </div>
       </section>
 
-      {/* Two-column layout for Automation and Monitoring */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-        {/* Automation Section */}
-        <section>
-          <h2 className="text-xl font-semibold mb-4">Automation</h2>
-          <div className="space-y-4">
-            <AutomationCard
-              title="Playbooks"
-              description="Reusable workflow templates"
-              href="/playbooks"
-              count={automationStats.playbooks}
-              icon="📖"
-            />
-            <AutomationCard
-              title="Scheduler"
-              description="Scheduled jobs and triggers"
-              href="/scheduler"
-              count={automationStats.scheduledJobs}
-              icon="🕐"
-            />
-          </div>
-        </section>
-
-        {/* Monitoring Section */}
-        <section>
-          <h2 className="text-xl font-semibold mb-4">Monitoring</h2>
-          <div className="grid grid-cols-2 gap-4">
-            <MonitoringCard
-              title="Sources"
-              href="/sources"
-              icon="🌐"
-              stats={monitoringStats.sourcesError ? [
-                { label: "Status", value: "No data", color: "gray" },
-              ] : [
-                { label: "Healthy", value: monitoringStats.sourcesHealthy ?? "—", color: "green" },
-                { label: "Degraded", value: monitoringStats.sourcesDegraded ?? "—", color: "yellow" },
-              ]}
-            />
-            <MonitoringCard
-              title="Feedback"
-              href="/feedback"
-              icon="🔄"
-              stats={[
-                { label: "Pending", value: monitoringStats.feedbackPending, color: "yellow" },
-                { label: "Processed (24h)", value: monitoringStats.feedbackProcessed, color: "green" },
-              ]}
-            />
-            <MonitoringCard
-              title="Runs"
-              href="/runs"
-              icon="▶"
-              stats={[
-                { label: "Total", value: monitoringStats.runs, color: "blue" },
-              ]}
-            />
-            <MonitoringCard
-              title="Agents"
-              href="/agents"
-              icon="⚙"
-              stats={[
-                { label: "Registered", value: monitoringStats.agents, color: "purple" },
-              ]}
-            />
-          </div>
-        </section>
-      </div>
+      {/* Monitoring Section */}
+      <section>
+        <h2 className="text-xl font-semibold mb-4">Monitoring</h2>
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+          <MonitoringCard
+            title="Sources"
+            href="/sources"
+            icon="🌐"
+            stats={monitoringStats.sourcesError ? [
+              { label: "Status", value: "No data", color: "gray" },
+            ] : [
+              { label: "Healthy", value: monitoringStats.sourcesHealthy ?? "—", color: "green" },
+              { label: "Degraded", value: monitoringStats.sourcesDegraded ?? "—", color: "yellow" },
+            ]}
+          />
+          <MonitoringCard
+            title="Feedback"
+            href="/feedback"
+            icon="🔄"
+            stats={[
+              { label: "Pending", value: monitoringStats.feedbackPending, color: "yellow" },
+              { label: "Processed (24h)", value: monitoringStats.feedbackProcessed, color: "green" },
+            ]}
+          />
+          <MonitoringCard
+            title="Scheduler"
+            href="/scheduler"
+            icon="🕐"
+            stats={[
+              { label: "Jobs", value: automationStats.scheduledJobs, color: "blue" },
+            ]}
+          />
+          <MonitoringCard
+            title="Agents"
+            href="/agents"
+            icon="⚙"
+            stats={[
+              { label: "Registered", value: monitoringStats.agents, color: "purple" },
+            ]}
+          />
+        </div>
+      </section>
 
       {/* System Health & Learnings */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
@@ -499,34 +479,6 @@ function PipelineStageCard({
       </div>
       <div className="text-3xl font-bold mb-1">{count}</div>
       <p className="text-gray-400 text-xs">{description}</p>
-    </Link>
-  );
-}
-
-function AutomationCard({
-  title,
-  description,
-  href,
-  count,
-  icon,
-}: {
-  title: string;
-  description: string;
-  href: string;
-  count: number;
-  icon: string;
-}) {
-  return (
-    <Link
-      href={href}
-      className="flex items-center gap-4 border border-gray-800 rounded-lg p-4 hover:border-gray-700 transition-colors"
-    >
-      <span className="text-2xl">{icon}</span>
-      <div className="flex-1">
-        <h3 className="font-semibold">{title}</h3>
-        <p className="text-gray-400 text-sm">{description}</p>
-      </div>
-      <span className="text-2xl font-bold text-gray-500">{count}</span>
     </Link>
   );
 }

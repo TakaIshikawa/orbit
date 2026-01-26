@@ -26,15 +26,12 @@ const navSections: NavSection[] = [
   {
     title: "Pipeline",
     items: [
-      { href: "/pipeline", label: "Run Pipeline", icon: "▶" },
+      { href: "/playbooks", label: "Playbooks", icon: "▶" },
       { href: "/patterns", label: "Patterns", icon: "◈", step: "1" },
       { href: "/issues", label: "Issues", icon: "!", step: "2" },
-    ],
-  },
-  {
-    title: "Automation",
-    items: [
-      { href: "/playbooks", label: "Playbooks", icon: "📖" },
+      { href: "/briefs", label: "Briefs", icon: "📋", step: "3" },
+      { href: "/verifications", label: "Verifications", icon: "✓", step: "4" },
+      { href: "/solutions", label: "Solutions", icon: "💡", step: "5" },
     ],
   },
   {
@@ -42,6 +39,7 @@ const navSections: NavSection[] = [
     items: [
       { href: "/sources", label: "Sources", icon: "🌐" },
       { href: "/feedback", label: "Feedback", icon: "🔄" },
+      { href: "/scheduler", label: "Scheduler", icon: "🕐" },
       { href: "/agents", label: "Agents", icon: "⚙" },
     ],
   },

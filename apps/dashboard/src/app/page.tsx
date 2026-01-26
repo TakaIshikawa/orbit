@@ -344,25 +344,25 @@ export default function Home() {
         <section className="border border-gray-800 rounded-lg p-6">
           <div className="flex items-center justify-between mb-4">
             <h2 className="text-xl font-semibold">System Learnings</h2>
-            <Link href="/feedback" className="text-xs text-blue-400 hover:underline">
-              View feedback loop →
-            </Link>
+            <span className="text-xs text-gray-500">
+              {learningsData?.meta?.total ?? 0} total entries
+            </span>
           </div>
 
           {learningsData?.data && learningsData.data.length > 0 ? (
             <div className="space-y-3">
-              {["pattern_verification", "source_reliability", "solution_effectiveness"].map((category) => {
+              {["pattern_verification", "source_reliability", "solution_effectiveness"].map((cat) => {
                 const categoryLearnings = learningsData.data.filter(
-                  (l) => l.learningCategory === category
+                  (l) => l.category === cat
                 );
                 if (categoryLearnings.length === 0) return null;
 
                 const topLearning = categoryLearnings[0];
                 return (
-                  <div key={category} className="bg-gray-800/50 rounded p-3">
+                  <div key={cat} className="bg-gray-800/50 rounded p-3">
                     <div className="flex items-center justify-between mb-2">
                       <span className="text-sm font-medium capitalize">
-                        {category.replace(/_/g, " ")}
+                        {cat.replace(/_/g, " ")}
                       </span>
                       <span className="text-xs text-gray-500">
                         {categoryLearnings.length} entries

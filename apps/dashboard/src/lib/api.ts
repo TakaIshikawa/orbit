@@ -351,7 +351,7 @@ export interface ConfidenceAdjustment {
 
 export interface SystemLearning {
   id: string;
-  learningCategory: string;
+  category: string;  // API returns "category" not "learningCategory"
   learningKey: string;
   sampleSize: number;
   successCount: number;
@@ -366,8 +366,8 @@ export interface SystemLearning {
     observedAt: string;
     sourceEntityIds: string[];
   }>;
-  firstLearnedAt: string;
-  lastUpdatedAt: string;
+  createdAt: string;
+  updatedAt: string;
 }
 
 export interface EvaluationRun {

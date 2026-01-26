@@ -649,3 +649,61 @@ export async function generatePlaybookExecutionFeedback(
     `[FeedbackProcessor] Generated playbook execution feedback: ${feedbackId} (${execution.success ? "success" : "failure"})`
   );
 }
+
+/**
+ * Generate feedback events from source fetch results during scout runs
+ *
+ * This tracks source reliability based on fetch success/failure,
+ * creating feedback events that can update source health scores.
+ */
+export async function generateSourceFetchFeedback(
+  db: Database,
+  fetchResults: Array<{
+    url: string;
+    success: boolean;
+    responseTimeMs?: number;
+    contentLength?: number;
+    error?: string;
+  }>
+): Promise<number> {
+  const feedbackRepo = new FeedbackEventRepository(db);
+
+  let generated = 0;
+
+  for (const result of fetchResults) {
+    try {
+      const domain = new URL(result.url).hostname.replace(/^www\./, "");
+
+      // Calculate accuracy score based on fetch success
+      // Success = high accuracy, failure = low accuracy
+      const accuracyScore = result.success ? 0.8 : 0.2;
+
+      // Create feedback event
+      const feedbackId = `fb_fetch_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+
+      await feedbackRepo.create({
+        id: feedbackId,
+        feedbackType: "source_accuracy",
+        sourceEntityType: "source_fetch",
+        sourceEntityId: feedbackId,
+        targetEntityType: "source_health",
+        targetEntityId: domain,
+        feedbackData: {
+          sourceDomain: domain,
+          accuracyScore,
+          verificationCount: 1,
+          // Store fetch-specific data
+          alignment: result.success ? "supports" : "contradicts",
+        },
+        status: "pending",
+        createdAt: new Date(),
+      });
+
+      generated++;
+    } catch (e) {
+      // Invalid URL, skip
+    }
+  }
+
+  return generated;
+}

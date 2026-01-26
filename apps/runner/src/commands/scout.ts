@@ -23,7 +23,7 @@ if (!process.env.ANTHROPIC_API_KEY) {
 async function main() {
   const { Command } = await import("commander");
   const { ScoutAgent } = await import("@orbit/agent");
-  const { getDatabase, PatternRepository, SourceHealthRepository } = await import("@orbit/db");
+  const { getDatabase, PatternRepository, SourceHealthRepository, FeedbackEventRepository } = await import("@orbit/db");
   const { generateId, computeContentHash } = await import("@orbit/core");
   const { fetchSourceWithLogging } = await import("../sources/fetcher.js");
   const { loadSourcesConfig } = await import("../sources/config.js");
@@ -35,6 +35,7 @@ async function main() {
   } = await import("../sources/recommended.js");
   const { getAccessibility, isPubliclyAccessible } = await import("../sources/accessibility.js");
   const { getLLMCredibilityAssessor } = await import("../sources/llm-assessor.js");
+  const { generateSourceFetchFeedback } = await import("../jobs/feedback-processor.js");
 
   type SourceConfig = {
     url: string;
@@ -191,6 +192,13 @@ async function main() {
       // Fetch content from sources (with logging for source health tracking)
       console.log("\n📥 Fetching sources...");
       const fetchedSources = [];
+      const fetchResults: Array<{
+        url: string;
+        success: boolean;
+        responseTimeMs?: number;
+        contentLength?: number;
+        error?: string;
+      }> = [];
 
       for (const source of sources) {
         if (verbose) console.log(`  Fetching: ${source.url}`);
@@ -202,16 +210,39 @@ async function main() {
             url: source.url,
             title: source.name,
           });
+          fetchResults.push({
+            url: source.url,
+            success: true,
+            responseTimeMs,
+            contentLength: content.length,
+          });
           const timeNote = verbose ? ` (${responseTimeMs}ms)` : "";
           console.log(`  ✓ ${source.name || source.url}${timeNote}`);
         } catch (error) {
-          console.error(`  ✗ ${source.name || source.url}: ${error instanceof Error ? error.message : "Failed"}`);
+          const errorMsg = error instanceof Error ? error.message : "Failed";
+          fetchResults.push({
+            url: source.url,
+            success: false,
+            error: errorMsg,
+          });
+          console.error(`  ✗ ${source.name || source.url}: ${errorMsg}`);
         }
       }
 
       if (fetchedSources.length === 0) {
         console.error("\nNo sources fetched successfully. Exiting.");
         process.exit(1);
+      }
+
+      // Generate feedback events for source fetch results
+      if (!dryRun) {
+        console.log("\n🔄 Generating feedback events...");
+        try {
+          const feedbackCount = await generateSourceFetchFeedback(db, fetchResults);
+          console.log(`   Generated ${feedbackCount} source feedback events`);
+        } catch (error) {
+          console.error(`   ⚠️ Error generating feedback:`, error instanceof Error ? error.message : "Unknown");
+        }
       }
 
       // Recalculate source health for fetched domains

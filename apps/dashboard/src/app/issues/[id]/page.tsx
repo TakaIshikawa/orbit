@@ -490,9 +490,9 @@ interface SituationModel {
   keyInsights: string[];
   recommendedLeveragePoints: string[];
   systemMap?: {
-    actors: Array<{ name: string; type: string; influence: string }>;
+    actors: Array<{ id: string; name: string; role: string; interests: string[]; influence: number }>;
     relationships: Array<{ from: string; to: string; type: string }>;
-    feedbackLoops: Array<{ name: string; type: string; description: string }>;
+    feedbackLoops: Array<{ description: string; reinforcing: boolean; nodes: string[] }>;
   };
 }
 
@@ -545,13 +545,13 @@ function SituationTab({ situation, isLoading }: { situation: SituationModel; isL
                   <div key={i} className="bg-gray-800/30 rounded p-2 flex items-center justify-between">
                     <div>
                       <span className="text-sm font-medium">{actor.name}</span>
-                      <span className="text-xs text-gray-500 ml-2">{actor.type}</span>
+                      <span className="text-xs text-gray-500 ml-2">{actor.role}</span>
                     </div>
                     <span className={`text-xs px-1.5 py-0.5 rounded ${
-                      actor.influence === "high" ? "bg-red-900/50 text-red-300" :
-                      actor.influence === "medium" ? "bg-yellow-900/50 text-yellow-300" :
+                      actor.influence >= 0.7 ? "bg-red-900/50 text-red-300" :
+                      actor.influence >= 0.4 ? "bg-yellow-900/50 text-yellow-300" :
                       "bg-gray-700 text-gray-300"
-                    }`}>{actor.influence}</span>
+                    }`}>{(actor.influence * 100).toFixed(0)}%</span>
                   </div>
                 ))}
               </div>
@@ -566,11 +566,13 @@ function SituationTab({ situation, isLoading }: { situation: SituationModel; isL
                 {situation.systemMap.feedbackLoops.map((loop, i) => (
                   <div key={i} className="bg-gray-800/30 rounded p-3">
                     <div className="flex items-center gap-2 mb-1">
-                      <span className="font-medium text-sm">{loop.name}</span>
                       <span className={`text-xs px-1.5 py-0.5 rounded ${
-                        loop.type === "reinforcing" ? "bg-red-900/50 text-red-300" :
+                        loop.reinforcing ? "bg-red-900/50 text-red-300" :
                         "bg-blue-900/50 text-blue-300"
-                      }`}>{loop.type}</span>
+                      }`}>{loop.reinforcing ? "reinforcing" : "balancing"}</span>
+                      {loop.nodes.length > 0 && (
+                        <span className="text-xs text-gray-500">{loop.nodes.join(" → ")}</span>
+                      )}
                     </div>
                     <p className="text-sm text-gray-400">{loop.description}</p>
                   </div>

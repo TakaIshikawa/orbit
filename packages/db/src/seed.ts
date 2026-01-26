@@ -514,7 +514,7 @@ async function seedRunLogs(runLogRepo: RunLogRepository): Promise<void> {
       toolCalls: [],
       runStatus: "success" as const,
       error: null,
-      artifacts: ["sol-001"],
+      artifacts: [{ type: "solution_ref", content: "sol-001" }],
       stateChanges: ["created:solution:sol-001"],
     },
   ];

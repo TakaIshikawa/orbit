@@ -31,7 +31,7 @@ export const runLogs = pgTable("run_logs", {
   toolCalls: jsonb("tool_calls").notNull().default([]),
   runStatus: runStatusEnum("run_status").notNull().default("running"),
   error: text("error"),
-  artifacts: jsonb("artifacts").$type<string[]>().notNull().default([]),
+  artifacts: jsonb("artifacts").$type<Array<{ type: string; content: string }>>().notNull().default([]),
   stateChanges: jsonb("state_changes").$type<string[]>().notNull().default([]),
 });
 

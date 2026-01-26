@@ -318,7 +318,9 @@ feedbackRoutes.post("/evaluate", async (c) => {
     const avgPatternConfidence = patterns.data.length > 0
       ? patterns.data.reduce((sum, p) => sum + (p.confidence || 0), 0) / patterns.data.length
       : 0;
-    const verifiedPatterns = patterns.data.filter(p => p.status === "verified").length;
+    // Check if patterns have been verified by looking at verifications, not pattern status
+    const verifiedPatternIds = new Set(verifications.data.map(v => v.sourceId));
+    const verifiedPatterns = patterns.data.filter(p => verifiedPatternIds.has(p.id)).length;
     const patternVerificationRate = patterns.data.length > 0
       ? verifiedPatterns / patterns.data.length
       : 0;
@@ -343,28 +345,53 @@ feedbackRoutes.post("/evaluate", async (c) => {
       : 0;
 
     // Calculate verification accuracy
-    const corroboratedVerifications = verifications.data.filter(v => v.verificationStatus === "corroborated").length;
+    const corroboratedVerifications = verifications.data.filter(v => v.status === "corroborated").length;
     const avgVerificationAccuracy = verifications.data.length > 0
       ? corroboratedVerifications / verifications.data.length
       : 0;
 
     // Generate recommendations based on metrics
-    const recommendations: string[] = [];
+    const recommendations: Array<{ area: string; recommendation: string; priority: "high" | "medium" | "low"; expectedImpact: string }> = [];
 
     if (avgPatternConfidence < 0.6) {
-      recommendations.push("Pattern confidence is low. Consider running more verification passes.");
+      recommendations.push({
+        area: "patterns",
+        recommendation: "Pattern confidence is low. Consider running more verification passes.",
+        priority: "medium",
+        expectedImpact: "Improve pattern reliability",
+      });
     }
     if (degradedSources > 0) {
-      recommendations.push(`${degradedSources} source(s) are degraded or unhealthy. Review source health.`);
+      recommendations.push({
+        area: "sources",
+        recommendation: `${degradedSources} source(s) are degraded or unhealthy. Review source health.`,
+        priority: "high",
+        expectedImpact: "Restore data collection reliability",
+      });
     }
     if (pendingFeedback.length > 50) {
-      recommendations.push(`${pendingFeedback.length} pending feedback events. Run feedback processor.`);
+      recommendations.push({
+        area: "feedback",
+        recommendation: `${pendingFeedback.length} pending feedback events. Run feedback processor.`,
+        priority: "medium",
+        expectedImpact: "Update confidence scores",
+      });
     }
     if (patterns.data.length > 0 && verifiedPatterns === 0) {
-      recommendations.push("No patterns have been verified yet. Run the verify command.");
+      recommendations.push({
+        area: "verification",
+        recommendation: "No patterns have been verified yet. Run the verify command.",
+        priority: "high",
+        expectedImpact: "Establish pattern validity",
+      });
     }
     if (issues.data.length > 0 && resolvedIssues === 0) {
-      recommendations.push("No issues have been resolved. Review and triage open issues.");
+      recommendations.push({
+        area: "issues",
+        recommendation: "No issues have been resolved. Review and triage open issues.",
+        priority: "low",
+        expectedImpact: "Track progress on systemic issues",
+      });
     }
 
     // Create evaluation record with real metrics

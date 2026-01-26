@@ -1,0 +1,33 @@
+{
+  "name": "orbit",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
+  "scripts": {
+    "dev": "turbo dev",
+    "dev:api": "npm run --workspace=@orbit/api dev",
+    "build": "turbo build",
+    "test": "turbo test",
+    "lint": "biome check .",
+    "lint:fix": "biome check --write .",
+    "format": "biome format --write .",
+    "typecheck": "turbo typecheck",
+    "db:push": "npm run --workspace=@orbit/db db:push",
+    "db:migrate": "npm run --workspace=@orbit/db db:migrate",
+    "db:generate": "npm run --workspace=@orbit/db db:generate",
+    "db:seed": "npm run --workspace=@orbit/db db:seed",
+    "scout": "npm run --workspace=@orbit/runner scout",
+    "scheduler": "npm run --workspace=@orbit/runner scheduler"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^1.9.0",
+    "tsx": "^4.19.0",
+    "turbo": "^2.3.0",
+    "typescript": "^5.7.0"
+  },
+  "packageManager": "npm@10.8.3"
+}

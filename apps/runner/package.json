@@ -1,0 +1,33 @@
+{
+  "name": "@orbit/runner",
+  "version": "0.1.0",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsx watch src/index.ts",
+    "scout": "tsx src/commands/scout.ts",
+    "analyze": "tsx src/commands/analyze.ts",
+    "brief": "tsx src/commands/brief.ts",
+    "verify": "tsx src/commands/verify.ts",
+    "playbook": "tsx src/commands/playbook.ts",
+    "plan": "tsx src/commands/plan.ts",
+    "pipeline": "npm run scout -- --recommended && npm run analyze && npm run plan -- --all",
+    "scheduler": "tsx src/scheduler.ts"
+  },
+  "dependencies": {
+    "@orbit/agent": "*",
+    "@orbit/core": "*",
+    "@orbit/db": "*",
+    "@orbit/llm": "*",
+    "commander": "^12.0.0",
+    "dotenv": "^16.4.5",
+    "node-cron": "^3.0.3"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "@types/node-cron": "^3.0.11",
+    "tsx": "^4.0.0",
+    "typescript": "^5.7.0"
+  }
+}

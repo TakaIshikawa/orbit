@@ -1,0 +1,36 @@
+{
+  "sources": [
+    {
+      "name": "Hacker News",
+      "url": "https://news.ycombinator.com/",
+      "type": "news",
+      "domains": ["technology", "startups"]
+    },
+    {
+      "name": "AI News - MIT Tech Review",
+      "url": "https://www.technologyreview.com/topic/artificial-intelligence/",
+      "type": "news",
+      "domains": ["technology", "ai", "policy"]
+    },
+    {
+      "name": "Brookings - Tech Policy",
+      "url": "https://www.brookings.edu/topic/technology-policy/",
+      "type": "research",
+      "domains": ["policy", "technology", "governance"]
+    },
+    {
+      "name": "Open Source Security Foundation",
+      "url": "https://openssf.org/blog/",
+      "type": "observation",
+      "domains": ["technology", "security", "open-source"]
+    }
+  ],
+  "schedule": {
+    "cron": "0 */6 * * *",
+    "enabled": true
+  },
+  "defaults": {
+    "query": "systemic issues, structural problems, policy gaps, coordination failures",
+    "domains": ["technology", "policy", "economics"]
+  }
+}

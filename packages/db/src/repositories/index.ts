@@ -1,0 +1,34 @@
+export * from "./base.js";
+export * from "./patterns.js";
+export * from "./issues.js";
+export * from "./problem-briefs.js";
+export * from "./situation-models.js";
+export * from "./solutions.js";
+export * from "./decisions.js";
+export * from "./artifacts.js";
+export * from "./run-logs.js";
+export * from "./playbooks.js";
+export * from "./verifications.js";
+export * from "./scheduled-jobs.js";
+export * from "./playbook-executions.js";
+export * from "./solution-outcomes.js";
+export * from "./source-health.js";
+export * from "./feedback.js";
+
+// Re-export types for convenience
+export type { PatternRow, NewPatternRow } from "../schema/patterns.js";
+export type { IssueRow, NewIssueRow } from "../schema/issues.js";
+export type { ProblemBriefRow, NewProblemBriefRow } from "../schema/problem-briefs.js";
+export type { SituationModelRow, NewSituationModelRow } from "../schema/situation-models.js";
+export type { SolutionRow, NewSolutionRow } from "../schema/solutions.js";
+export type { DecisionRow, NewDecisionRow } from "../schema/decisions.js";
+export type { ArtifactRow, NewArtifactRow } from "../schema/artifacts.js";
+export type { RunLogRow, NewRunLogRow } from "../schema/run-logs.js";
+export type { PlaybookRow, NewPlaybookRow } from "../schema/playbooks.js";
+export type { VerificationRow, NewVerificationRow } from "../schema/verifications.js";
+export type { ScheduledJobRow, NewScheduledJobRow, JobRunRow, NewJobRunRow } from "../schema/scheduled-jobs.js";
+export type { PlaybookExecutionRow, NewPlaybookExecutionRow, PlaybookStepExecutionRow, NewPlaybookStepExecutionRow } from "../schema/playbook-executions.js";
+export type { PlaybookStep, PlaybookTrigger, PlaybookStepAction } from "../schema/playbooks.js";
+export type { SolutionOutcomeRow, NewSolutionOutcomeRow, SolutionEffectivenessRow, NewSolutionEffectivenessRow } from "../schema/solution-outcomes.js";
+export type { SourceFetchLogRow, NewSourceFetchLogRow, SourceHealthRow, NewSourceHealthRow, SourceReliabilityHistoryRow, NewSourceReliabilityHistoryRow } from "../schema/source-health.js";
+export type { FeedbackEventRow, NewFeedbackEventRow, ConfidenceAdjustmentRow, NewConfidenceAdjustmentRow, SystemLearningRow, NewSystemLearningRow, EvaluationRunRow, NewEvaluationRunRow } from "../schema/feedback.js";

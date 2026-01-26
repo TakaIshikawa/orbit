@@ -27,20 +27,10 @@ const navSections: NavSection[] = [
     title: "Pipeline",
     items: [
       { href: "/playbooks", label: "Run Pipeline", icon: "▶" },
-      { href: "/patterns", label: "Patterns", icon: "◈", step: "1" },
-      { href: "/issues", label: "Issues", icon: "!", step: "2" },
-      { href: "/briefs", label: "Briefs", icon: "📋", step: "3" },
-      { href: "/verifications", label: "Verifications", icon: "✓", step: "4" },
-      { href: "/solutions", label: "Solutions", icon: "💡", step: "5" },
-    ],
-  },
-  {
-    title: "Monitoring",
-    items: [
       { href: "/sources", label: "Sources", icon: "🌐" },
+      { href: "/patterns", label: "Patterns", icon: "◈" },
+      { href: "/issues", label: "Issues / Solutions", icon: "!" },
       { href: "/feedback", label: "Feedback", icon: "🔄" },
-      { href: "/scheduler", label: "Scheduler", icon: "🕐" },
-      { href: "/agents", label: "Agents", icon: "⚙" },
     ],
   },
 ];

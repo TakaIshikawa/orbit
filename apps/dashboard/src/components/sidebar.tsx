@@ -26,7 +26,7 @@ const navSections: NavSection[] = [
   {
     title: "Pipeline",
     items: [
-      { href: "/playbooks", label: "Playbooks", icon: "▶" },
+      { href: "/playbooks", label: "Run Pipeline", icon: "▶" },
       { href: "/patterns", label: "Patterns", icon: "◈", step: "1" },
       { href: "/issues", label: "Issues", icon: "!", step: "2" },
       { href: "/briefs", label: "Briefs", icon: "📋", step: "3" },

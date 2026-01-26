@@ -397,7 +397,7 @@ export interface EvaluationRun {
     adjustmentsMade?: number;
     avgAdjustmentMagnitude?: number;
   };
-  recommendations: string[];
+  recommendations: Array<{ area: string; recommendation: string; priority: "high" | "medium" | "low"; expectedImpact: string }>;
   trends?: Record<string, unknown> | null;
 }
 

@@ -7,6 +7,8 @@ import {
   ConfidenceAdjustmentRepository,
   SystemLearningRepository,
   EvaluationRunRepository,
+  PatternRepository,
+  SourceHealthRepository,
 } from "@orbit/db";
 
 export const feedbackRoutes = new Hono();
@@ -245,6 +247,9 @@ feedbackRoutes.post("/process", async (c) => {
   const db = getDatabase();
   const feedbackRepo = new FeedbackEventRepository(db);
   const adjustmentRepo = new ConfidenceAdjustmentRepository(db);
+  const learningRepo = new SystemLearningRepository(db);
+  const patternRepo = new PatternRepository(db);
+  const healthRepo = new SourceHealthRepository(db);
 
   try {
     // Get pending events
@@ -252,15 +257,175 @@ feedbackRoutes.post("/process", async (c) => {
 
     let eventsProcessed = 0;
     let adjustmentsMade = 0;
+    let learningsUpdated = 0;
     let errors = 0;
 
-    // Process each event (simplified inline processing)
+    // Process each event based on type
     for (const event of pending) {
       try {
-        // Mark as processed (actual adjustment logic would go here)
-        await feedbackRepo.markProcessed(event.id, false);
+        let adjusted = false;
+        let adjustmentDetails: { field?: string; previousValue?: number; newValue?: number; adjustmentReason?: string } | undefined;
+
+        if (event.feedbackType === "verification_result") {
+          // Process verification feedback - adjust pattern confidence
+          const pattern = await patternRepo.findById(event.targetEntityId);
+          if (pattern) {
+            const data = event.feedbackData as { verificationStatus?: string };
+            const verificationStatus = data.verificationStatus;
+
+            let confidenceMultiplier = 1.0;
+            switch (verificationStatus) {
+              case "corroborated": confidenceMultiplier = 1.05; break;
+              case "contested": confidenceMultiplier = 0.85; break;
+              case "partially_supported": confidenceMultiplier = 0.95; break;
+              case "unverified": confidenceMultiplier = 0.98; break;
+            }
+
+            const previousConfidence = pattern.confidence;
+            const newConfidence = Math.max(0.1, Math.min(1.0, previousConfidence * confidenceMultiplier));
+
+            if (Math.abs(newConfidence - previousConfidence) >= 0.001) {
+              await patternRepo.update(event.targetEntityId, { confidence: newConfidence });
+              await adjustmentRepo.recordAdjustment(
+                "pattern",
+                event.targetEntityId,
+                "confidence",
+                previousConfidence,
+                newConfidence,
+                `Verification ${verificationStatus}`,
+                event.id
+              );
+              adjusted = true;
+              adjustmentsMade++;
+              adjustmentDetails = {
+                field: "confidence",
+                previousValue: previousConfidence,
+                newValue: newConfidence,
+                adjustmentReason: `Verification result: ${verificationStatus}`,
+              };
+
+              // Update learning
+              await learningRepo.upsertLearning(
+                "pattern_verification",
+                `pattern_type:${pattern.patternType}`,
+                {
+                  incrementSample: true,
+                  incrementSuccess: verificationStatus === "corroborated",
+                  incrementFailure: verificationStatus === "contested",
+                  avgConfidence: newConfidence,
+                }
+              );
+              learningsUpdated++;
+            }
+          }
+        } else if (event.feedbackType === "source_accuracy") {
+          // Process source accuracy feedback - adjust source reliability
+          const domain = event.targetEntityId;
+          const health = await healthRepo.findByDomain(domain);
+
+          if (health) {
+            const data = event.feedbackData as { accuracyScore?: number; alignment?: string };
+            const accuracyScore = data.accuracyScore ?? 0.5;
+
+            // Update verification counts
+            const verificationOutcome = accuracyScore >= 0.7 ? "corroborated" : accuracyScore <= 0.3 ? "contested" : "neutral";
+            const newCorroborated = health.corroboratedCount + (verificationOutcome === "corroborated" ? 1 : 0);
+            const newContested = health.contestedCount + (verificationOutcome === "contested" ? 1 : 0);
+            const newTotalVerifications = health.totalVerifications + 1;
+
+            // Calculate verification-based reliability adjustment
+            const verificationAccuracy = newTotalVerifications > 0 ? newCorroborated / newTotalVerifications : 0.5;
+            const previousReliability = health.dynamicReliability ?? 0.5;
+            const verificationWeight = Math.min(0.3, newTotalVerifications * 0.05);
+            const newReliability = previousReliability * (1 - verificationWeight) + verificationAccuracy * verificationWeight;
+
+            // Update source health
+            await healthRepo.update(health.id, {
+              dynamicReliability: newReliability,
+              reliabilityConfidence: Math.min(1, (health.reliabilityConfidence ?? 0) + 0.05),
+              totalVerifications: newTotalVerifications,
+              corroboratedCount: newCorroborated,
+              contestedCount: newContested,
+              lastCalculatedAt: new Date(),
+            });
+
+            if (Math.abs(newReliability - previousReliability) > 0.01) {
+              await adjustmentRepo.recordAdjustment(
+                "source_health",
+                domain,
+                "dynamicReliability",
+                previousReliability,
+                newReliability,
+                `Verification accuracy: ${(verificationAccuracy * 100).toFixed(1)}%`,
+                event.id
+              );
+              adjusted = true;
+              adjustmentsMade++;
+              adjustmentDetails = {
+                field: "dynamicReliability",
+                previousValue: previousReliability,
+                newValue: newReliability,
+                adjustmentReason: `Source accuracy update`,
+              };
+            }
+
+            // Update learning
+            await learningRepo.upsertLearning(
+              "source_reliability",
+              `domain:${domain}`,
+              {
+                incrementSample: true,
+                incrementSuccess: verificationOutcome === "corroborated",
+                incrementFailure: verificationOutcome === "contested",
+                avgAccuracy: accuracyScore,
+              }
+            );
+            learningsUpdated++;
+          } else {
+            // Create source health record if it doesn't exist
+            const newId = `sh_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`;
+            const data = event.feedbackData as { accuracyScore?: number };
+            const accuracyScore = data.accuracyScore ?? 0.5;
+
+            await healthRepo.create({
+              id: newId,
+              domain,
+              healthStatus: "unknown",
+              successRate: accuracyScore >= 0.5 ? 1 : 0,
+              totalFetches: 1,
+              failedFetches: accuracyScore < 0.5 ? 1 : 0,
+              successfulFetches: accuracyScore >= 0.5 ? 1 : 0,
+              avgResponseTimeMs: 0,
+              p95ResponseTimeMs: 0,
+              minResponseTimeMs: 0,
+              maxResponseTimeMs: 0,
+              errorsByType: {},
+              baseReliability: 0.5,
+              dynamicReliability: accuracyScore,
+              reliabilityConfidence: 0.1,
+              totalVerifications: 1,
+              corroboratedCount: accuracyScore >= 0.7 ? 1 : 0,
+              contestedCount: accuracyScore <= 0.3 ? 1 : 0,
+              alertActive: false,
+              alertReason: null,
+              alertSince: null,
+              windowStartAt: new Date(),
+              windowDays: 7,
+              lastFetchAt: new Date(),
+              lastCalculatedAt: new Date(),
+            });
+            adjusted = true;
+            adjustmentsMade++;
+            learningsUpdated++;
+          }
+        }
+
+        // Mark event as processed
+        await feedbackRepo.markProcessed(event.id, adjusted, adjustmentDetails);
         eventsProcessed++;
-      } catch {
+      } catch (err) {
+        console.error(`Error processing event ${event.id}:`, err);
+        await feedbackRepo.markProcessed(event.id, false, undefined, err instanceof Error ? err.message : "Unknown error");
         errors++;
       }
     }
@@ -269,7 +434,7 @@ feedbackRoutes.post("/process", async (c) => {
       data: {
         eventsProcessed,
         adjustmentsMade,
-        learningsUpdated: 0,
+        learningsUpdated,
         errors,
       },
     });

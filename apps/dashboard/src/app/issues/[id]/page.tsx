@@ -90,8 +90,8 @@ export default function IssueDetailPage() {
     { id: "overview", label: "Overview", available: true },
     { id: "brief", label: "Problem Brief", available: !!brief },
     { id: "situation", label: "Situation Model", available: !!situation },
-    { id: "solutions", label: "Solutions", available: solutions.length > 0, count: solutions.length },
     { id: "verifications", label: "Verifications", available: verifications.length > 0, count: verifications.length },
+    { id: "solutions", label: "Solutions", available: solutions.length > 0, count: solutions.length },
   ];
 
   return (

@@ -154,14 +154,6 @@ export default function Home() {
             />
             <PipelineStageCard
               step={2}
-              title="Verifications"
-              description="Claims validated"
-              href="/verifications"
-              count={pipelineStats.verifications}
-              color="cyan"
-            />
-            <PipelineStageCard
-              step={3}
               title="Issues"
               description="IUTLN scored"
               href="/issues"
@@ -169,12 +161,20 @@ export default function Home() {
               color="purple"
             />
             <PipelineStageCard
-              step={4}
+              step={3}
               title="Briefs"
               description="Problem analysis"
               href="/briefs"
               count={pipelineStats.briefs}
               color="orange"
+            />
+            <PipelineStageCard
+              step={4}
+              title="Verifications"
+              description="Claims validated"
+              href="/verifications"
+              count={pipelineStats.verifications}
+              color="cyan"
             />
             <PipelineStageCard
               step={5}

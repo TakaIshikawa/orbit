@@ -487,26 +487,23 @@ function LearningRow({ learning }: { learning: SystemLearning }) {
 }
 
 function EvaluationRow({ evaluation }: { evaluation: EvaluationRun }) {
-  const statusColors = {
-    completed: "text-green-400",
-    running: "text-yellow-400",
-    failed: "text-red-400",
-  };
+  const isCompleted = !!evaluation.completedAt;
+  const hasRecommendations = evaluation.recommendations?.length > 0;
 
   return (
     <div className="flex items-center justify-between">
       <div>
-        <div className="text-sm text-zinc-200">{evaluation.runType}</div>
+        <div className="text-sm text-zinc-200">System Evaluation</div>
         <div className="text-xs text-zinc-500">
-          {new Date(evaluation.startedAt).toLocaleString()}
+          {new Date(evaluation.createdAt).toLocaleString()}
         </div>
       </div>
       <div className="flex items-center gap-3">
-        {evaluation.alertCount > 0 && (
-          <span className="text-xs text-red-400">{evaluation.alertCount} alerts</span>
+        {hasRecommendations && (
+          <span className="text-xs text-yellow-400">{evaluation.recommendations.length} recommendations</span>
         )}
-        <span className={`text-xs ${statusColors[evaluation.status as keyof typeof statusColors] || "text-zinc-400"}`}>
-          {evaluation.status}
+        <span className={`text-xs ${isCompleted ? "text-green-400" : "text-yellow-400"}`}>
+          {isCompleted ? "completed" : "running"}
         </span>
       </div>
     </div>
@@ -514,80 +511,84 @@ function EvaluationRow({ evaluation }: { evaluation: EvaluationRun }) {
 }
 
 function EvaluationDetails({ evaluation }: { evaluation: EvaluationRun }) {
+  const isCompleted = !!evaluation.completedAt;
+  const m = evaluation.metrics;
+
   return (
     <div>
       <div className="flex items-center justify-between mb-4">
         <div>
-          <h4 className="text-lg font-medium text-zinc-100">{evaluation.runType}</h4>
+          <h4 className="text-lg font-medium text-zinc-100">System Evaluation</h4>
           <p className="text-sm text-zinc-400">
-            {new Date(evaluation.startedAt).toLocaleString()}
-            {evaluation.completedAt && ` - ${new Date(evaluation.completedAt).toLocaleString()}`}
+            {new Date(evaluation.periodStart).toLocaleDateString()} - {new Date(evaluation.periodEnd).toLocaleDateString()}
           </p>
         </div>
         <span className={`px-2 py-1 rounded text-xs ${
-          evaluation.status === "completed" ? "bg-green-500/20 text-green-300" :
-          evaluation.status === "failed" ? "bg-red-500/20 text-red-300" :
-          "bg-yellow-500/20 text-yellow-300"
+          isCompleted ? "bg-green-500/20 text-green-300" : "bg-yellow-500/20 text-yellow-300"
         }`}>
-          {evaluation.status}
+          {isCompleted ? "completed" : "running"}
         </span>
       </div>
 
       {/* Metrics Grid */}
       <div className="grid grid-cols-4 gap-4 mb-4">
-        {evaluation.metrics.patternCount !== undefined && (
+        {m.patternsCreated !== undefined && (
           <div className="bg-zinc-700/50 rounded p-3">
             <div className="text-xs text-zinc-400">Patterns</div>
-            <div className="text-lg font-bold text-zinc-100">{evaluation.metrics.patternCount}</div>
-            {evaluation.metrics.avgPatternConfidence !== undefined && (
+            <div className="text-lg font-bold text-zinc-100">{m.patternsCreated}</div>
+            {m.avgPatternConfidence !== undefined && (
               <div className="text-xs text-zinc-400">
-                {(evaluation.metrics.avgPatternConfidence * 100).toFixed(1)}% avg confidence
+                {(m.avgPatternConfidence * 100).toFixed(1)}% avg confidence
               </div>
             )}
           </div>
         )}
-        {evaluation.metrics.sourceCount !== undefined && (
+        {m.sourcesMonitored !== undefined && (
           <div className="bg-zinc-700/50 rounded p-3">
             <div className="text-xs text-zinc-400">Sources</div>
-            <div className="text-lg font-bold text-zinc-100">{evaluation.metrics.sourceCount}</div>
-            {evaluation.metrics.healthySourceRate !== undefined && (
+            <div className="text-lg font-bold text-zinc-100">{m.sourcesMonitored}</div>
+            {m.avgSourceHealth !== undefined && (
               <div className="text-xs text-zinc-400">
-                {(evaluation.metrics.healthySourceRate * 100).toFixed(1)}% healthy
+                {(m.avgSourceHealth * 100).toFixed(1)}% healthy
               </div>
             )}
           </div>
         )}
-        {evaluation.metrics.solutionCount !== undefined && (
+        {m.solutionsProposed !== undefined && (
           <div className="bg-zinc-700/50 rounded p-3">
             <div className="text-xs text-zinc-400">Solutions</div>
-            <div className="text-lg font-bold text-zinc-100">{evaluation.metrics.solutionCount}</div>
-            {evaluation.metrics.avgSolutionEffectiveness !== undefined && (
+            <div className="text-lg font-bold text-zinc-100">{m.solutionsProposed}</div>
+            {m.avgEffectiveness !== undefined && (
               <div className="text-xs text-zinc-400">
-                {(evaluation.metrics.avgSolutionEffectiveness * 100).toFixed(1)}% effectiveness
+                {(m.avgEffectiveness * 100).toFixed(1)}% effectiveness
               </div>
             )}
           </div>
         )}
-        {evaluation.metrics.feedbackPending !== undefined && (
+        {m.issuesCreated !== undefined && (
           <div className="bg-zinc-700/50 rounded p-3">
-            <div className="text-xs text-zinc-400">Feedback</div>
-            <div className="text-lg font-bold text-zinc-100">{evaluation.metrics.feedbackPending}</div>
-            <div className="text-xs text-zinc-400">pending</div>
+            <div className="text-xs text-zinc-400">Issues</div>
+            <div className="text-lg font-bold text-zinc-100">{m.issuesCreated}</div>
+            {m.issuesResolved !== undefined && (
+              <div className="text-xs text-zinc-400">
+                {m.issuesResolved} resolved
+              </div>
+            )}
           </div>
         )}
       </div>
 
-      {/* Alerts */}
-      {evaluation.alertCount > 0 && (
+      {/* Degraded Sources Alert */}
+      {m.degradedSources && m.degradedSources > 0 && (
         <div className="mb-4">
-          <div className="text-sm text-red-400 font-medium">
-            {evaluation.alertCount} alert{evaluation.alertCount !== 1 ? "s" : ""} generated
+          <div className="text-sm text-yellow-400 font-medium">
+            {m.degradedSources} degraded source{m.degradedSources !== 1 ? "s" : ""}
           </div>
         </div>
       )}
 
       {/* Recommendations */}
-      {evaluation.recommendations.length > 0 && (
+      {evaluation.recommendations && evaluation.recommendations.length > 0 && (
         <div>
           <div className="text-sm text-zinc-400 mb-2">Recommendations:</div>
           <ul className="space-y-1">

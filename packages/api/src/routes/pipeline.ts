@@ -109,11 +109,32 @@ pipelineRoutes.post("/scout", zValidator("json", scoutInputSchema), async (c) =>
     const completedAt = new Date();
     const runStatus = code === 0 ? "success" : "failed";
 
+    // Parse metrics from output if present
+    let llmCalls: Array<{ callId: number; model: string; tokens: { input: number; output: number }; latencyMs: number }> = [];
+    let decisions: Array<{ step: number; reasoning: string; actionChosen: string; confidence: number }> = [];
+
+    const fullOutput = output.join("\n");
+    const metricsMatch = fullOutput.match(/__METRICS_START__\n([\s\S]*?)\n__METRICS_END__/);
+    if (metricsMatch) {
+      try {
+        const metrics = JSON.parse(metricsMatch[1]);
+        llmCalls = metrics.llmCalls || [];
+        decisions = metrics.decisions || [];
+      } catch (e) {
+        console.error("Failed to parse metrics:", e);
+      }
+    }
+
+    // Remove metrics block from display output
+    const displayOutput = fullOutput.replace(/__METRICS_START__[\s\S]*?__METRICS_END__\n?/, "").trim();
+
     await runRepo.update(runId, {
       completedAt,
       runStatus,
       error: code !== 0 ? `Process exited with code ${code}` : null,
-      artifacts: [{ type: "output", content: output.join("\n") }],
+      artifacts: [{ type: "output", content: displayOutput }],
+      llmCalls,
+      decisions,
     });
 
     runningProcesses.delete(runId);
@@ -219,11 +240,32 @@ pipelineRoutes.post("/verify", zValidator("json", verifyInputSchema), async (c) 
     const completedAt = new Date();
     const runStatus = code === 0 ? "success" : "failed";
 
+    // Parse metrics from output if present
+    let llmCalls: Array<{ callId: number; model: string; tokens: { input: number; output: number }; latencyMs: number }> = [];
+    let decisions: Array<{ step: number; reasoning: string; actionChosen: string; confidence: number }> = [];
+
+    const fullOutput = output.join("\n");
+    const metricsMatch = fullOutput.match(/__METRICS_START__\n([\s\S]*?)\n__METRICS_END__/);
+    if (metricsMatch) {
+      try {
+        const metrics = JSON.parse(metricsMatch[1]);
+        llmCalls = metrics.llmCalls || [];
+        decisions = metrics.decisions || [];
+      } catch (e) {
+        console.error("Failed to parse metrics:", e);
+      }
+    }
+
+    // Remove metrics block from display output
+    const displayOutput = fullOutput.replace(/__METRICS_START__[\s\S]*?__METRICS_END__\n?/, "").trim();
+
     await runRepo.update(runId, {
       completedAt,
       runStatus,
       error: code !== 0 ? `Process exited with code ${code}` : null,
-      artifacts: [{ type: "output", content: output.join("\n") }],
+      artifacts: [{ type: "output", content: displayOutput }],
+      llmCalls,
+      decisions,
     });
 
     runningProcesses.delete(runId);

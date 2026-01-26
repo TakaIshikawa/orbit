@@ -284,48 +284,122 @@ feedbackRoutes.post("/process", async (c) => {
 });
 
 // Run system evaluation manually
-// Returns current system metrics snapshot
+// Returns current system metrics snapshot with real data
 feedbackRoutes.post("/evaluate", async (c) => {
   const db = getDatabase();
   const evalRepo = new EvaluationRunRepository(db);
 
   try {
+    // Import repositories dynamically to avoid circular deps
+    const { PatternRepository, IssueRepository, SolutionRepository, SourceHealthRepository, VerificationRepository } = await import("@orbit/db");
+
+    const patternRepo = new PatternRepository(db);
+    const issueRepo = new IssueRepository(db);
+    const solutionRepo = new SolutionRepository(db);
+    const sourceHealthRepo = new SourceHealthRepository(db);
+    const verificationRepo = new VerificationRepository(db);
+    const feedbackRepo = new FeedbackEventRepository(db);
+    const adjustmentRepo = new ConfidenceAdjustmentRepository(db);
+
     const id = `eval_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
     const now = new Date();
     const periodStart = new Date(now.getTime() - 24 * 60 * 60 * 1000);
 
-    // Create a basic evaluation record
+    // Gather actual metrics
+    const patterns = await patternRepo.findByFilters({}, { limit: 1000 });
+    const issues = await issueRepo.findByFilters({}, { limit: 1000 });
+    const solutions = await solutionRepo.findByFilters({}, { limit: 1000 });
+    const sourceHealth = await sourceHealthRepo.findMany({ limit: 1000 });
+    const verifications = await verificationRepo.findMany({ limit: 1000 });
+    const pendingFeedback = await feedbackRepo.findPending(1000);
+    const adjustmentStats = await adjustmentRepo.getAdjustmentStats(undefined, 1);
+
+    // Calculate pattern metrics
+    const avgPatternConfidence = patterns.data.length > 0
+      ? patterns.data.reduce((sum, p) => sum + (p.confidence || 0), 0) / patterns.data.length
+      : 0;
+    const verifiedPatterns = patterns.data.filter(p => p.status === "verified").length;
+    const patternVerificationRate = patterns.data.length > 0
+      ? verifiedPatterns / patterns.data.length
+      : 0;
+
+    // Calculate issue metrics
+    const resolvedIssues = issues.data.filter(i => i.issueStatus === "resolved").length;
+    const avgCompositeScore = issues.data.length > 0
+      ? issues.data.reduce((sum, i) => sum + (i.compositeScore || 0), 0) / issues.data.length
+      : 0;
+
+    // Calculate solution metrics
+    const completedSolutions = solutions.data.filter(s => s.solutionStatus === "completed").length;
+    const avgEffectiveness = solutions.data.length > 0
+      ? solutions.data.reduce((sum, s) => sum + (s.impactScore || 0), 0) / solutions.data.length
+      : 0;
+
+    // Calculate source health metrics
+    const healthySources = sourceHealth.data.filter(s => s.healthStatus === "healthy").length;
+    const degradedSources = sourceHealth.data.filter(s => s.healthStatus === "degraded" || s.healthStatus === "unhealthy").length;
+    const avgSourceHealth = sourceHealth.data.length > 0
+      ? sourceHealth.data.reduce((sum, s) => sum + (s.successRate || 0), 0) / sourceHealth.data.length
+      : 0;
+
+    // Calculate verification accuracy
+    const corroboratedVerifications = verifications.data.filter(v => v.verificationStatus === "corroborated").length;
+    const avgVerificationAccuracy = verifications.data.length > 0
+      ? corroboratedVerifications / verifications.data.length
+      : 0;
+
+    // Generate recommendations based on metrics
+    const recommendations: string[] = [];
+
+    if (avgPatternConfidence < 0.6) {
+      recommendations.push("Pattern confidence is low. Consider running more verification passes.");
+    }
+    if (degradedSources > 0) {
+      recommendations.push(`${degradedSources} source(s) are degraded or unhealthy. Review source health.`);
+    }
+    if (pendingFeedback.length > 50) {
+      recommendations.push(`${pendingFeedback.length} pending feedback events. Run feedback processor.`);
+    }
+    if (patterns.data.length > 0 && verifiedPatterns === 0) {
+      recommendations.push("No patterns have been verified yet. Run the verify command.");
+    }
+    if (issues.data.length > 0 && resolvedIssues === 0) {
+      recommendations.push("No issues have been resolved. Review and triage open issues.");
+    }
+
+    // Create evaluation record with real metrics
     const evaluation = await evalRepo.create({
       id,
       periodStart,
       periodEnd: now,
       completedAt: now,
       metrics: {
-        patternsCreated: 0,
-        patternsVerified: 0,
-        avgPatternConfidence: 0,
-        patternVerificationRate: 0,
-        issuesCreated: 0,
-        issuesResolved: 0,
-        avgResolutionTime: 0,
-        avgCompositeScore: 0,
-        solutionsProposed: 0,
-        solutionsCompleted: 0,
-        avgEffectiveness: 0,
-        solutionsExceedingEstimate: 0,
-        sourcesMonitored: 0,
-        avgSourceHealth: 0,
-        degradedSources: 0,
-        avgVerificationAccuracy: 0,
-        feedbackEventsProcessed: 0,
-        adjustmentsMade: 0,
-        avgAdjustmentMagnitude: 0,
+        patternsCreated: patterns.total,
+        patternsVerified: verifiedPatterns,
+        avgPatternConfidence,
+        patternVerificationRate,
+        issuesCreated: issues.total,
+        issuesResolved: resolvedIssues,
+        avgResolutionTime: 0, // Would need timestamp tracking
+        avgCompositeScore,
+        solutionsProposed: solutions.total,
+        solutionsCompleted: completedSolutions,
+        avgEffectiveness,
+        solutionsExceedingEstimate: 0, // Would need outcome tracking
+        sourcesMonitored: sourceHealth.total,
+        avgSourceHealth,
+        degradedSources,
+        avgVerificationAccuracy,
+        feedbackEventsProcessed: adjustmentStats.totalAdjustments,
+        adjustmentsMade: adjustmentStats.totalAdjustments,
+        avgAdjustmentMagnitude: adjustmentStats.avgAdjustmentMagnitude,
       },
-      recommendations: [],
+      recommendations,
     });
 
     return c.json({ data: evaluation });
   } catch (error) {
+    console.error("Evaluation error:", error);
     return c.json({
       error: {
         code: "EVALUATION_ERROR",

@@ -114,6 +114,10 @@ export interface RunLog {
   }>;
   runStatus: string;
   error: string | null;
+  artifacts?: Array<{
+    type: string;
+    content: string;
+  }>;
 }
 
 // Agent types
@@ -368,24 +372,33 @@ export interface SystemLearning {
 
 export interface EvaluationRun {
   id: string;
-  runType: string;
-  status: string;
-  startedAt: string;
+  createdAt: string;
   completedAt: string | null;
+  periodStart: string;
+  periodEnd: string;
   metrics: {
-    patternCount?: number;
+    patternsCreated?: number;
+    patternsVerified?: number;
     avgPatternConfidence?: number;
-    sourceCount?: number;
-    healthySourceRate?: number;
-    avgSourceReliability?: number;
-    solutionCount?: number;
-    avgSolutionEffectiveness?: number;
-    feedbackPending?: number;
-    feedbackProcessed24h?: number;
+    patternVerificationRate?: number;
+    issuesCreated?: number;
+    issuesResolved?: number;
+    avgResolutionTime?: number;
+    avgCompositeScore?: number;
+    solutionsProposed?: number;
+    solutionsCompleted?: number;
+    avgEffectiveness?: number;
+    solutionsExceedingEstimate?: number;
+    sourcesMonitored?: number;
+    avgSourceHealth?: number;
+    degradedSources?: number;
+    avgVerificationAccuracy?: number;
+    feedbackEventsProcessed?: number;
+    adjustmentsMade?: number;
+    avgAdjustmentMagnitude?: number;
   };
-  alertCount: number;
   recommendations: string[];
-  error: string | null;
+  trends?: Record<string, unknown> | null;
 }
 
 export interface FeedbackStats {

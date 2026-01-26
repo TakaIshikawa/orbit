@@ -111,7 +111,35 @@ program
     const briefRepo = new ProblemBriefRepository(db);
     const modelRepo = new SituationModelRepository(db);
     const verificationRepo = new VerificationRepository(db);
-    const llm = getLLMClient();
+    const llmClient = getLLMClient();
+
+    // Track LLM calls for metrics
+    const llmCalls: Array<{
+      callId: number;
+      model: string;
+      tokens: { input: number; output: number };
+      latencyMs: number;
+    }> = [];
+    let callCounter = 0;
+
+    // Wrapper to track LLM calls
+    const llm = {
+      async completeStructured<T extends z.ZodType>(
+        messages: Array<{ role: string; content: string }>,
+        options: { schema: T; systemPrompt?: string; schemaName?: string; schemaDescription?: string }
+      ) {
+        callCounter++;
+        const callId = callCounter;
+        const result = await llmClient.completeStructured(messages, options);
+        llmCalls.push({
+          callId,
+          model: result.metrics.model,
+          tokens: { input: result.metrics.inputTokens, output: result.metrics.outputTokens },
+          latencyMs: result.metrics.latencyMs,
+        });
+        return result;
+      }
+    };
 
     const maxClaims = parseInt(options.maxClaims);
     const maxSources = parseInt(options.maxSources);
@@ -516,6 +544,24 @@ Determine:
     }
 
     console.log("\n✅ Verification complete!");
+
+    // Output structured metrics for pipeline capture
+    const totalTokens = llmCalls.reduce((sum, c) => sum + c.tokens.input + c.tokens.output, 0);
+    const totalLatency = llmCalls.reduce((sum, c) => sum + c.latencyMs, 0);
+
+    console.log("\n__METRICS_START__");
+    console.log(JSON.stringify({
+      llmCalls,
+      decisions: [],
+      summary: {
+        claimsVerified: allResults.length,
+        totalTokens,
+        totalLatencyMs: totalLatency,
+        callCount: llmCalls.length,
+      }
+    }));
+    console.log("__METRICS_END__");
+
     process.exit(0);
   });
 

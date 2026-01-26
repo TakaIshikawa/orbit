@@ -76,7 +76,7 @@ export default function RunDetailPage() {
               {run.runStatus}
             </span>
             <span className="text-xs text-gray-500">
-              Triggered by: {run.triggeredBy.type}
+              Triggered by: {typeof run.triggeredBy === 'string' ? run.triggeredBy : run.triggeredBy?.type || 'unknown'}
             </span>
           </div>
           <h1 className="text-2xl font-bold font-mono">{run.agentId}</h1>
@@ -183,6 +183,24 @@ export default function RunDetailPage() {
         </div>
       </div>
 
+      {/* Embedded artifacts (from pipeline runs) */}
+      {run.artifacts && run.artifacts.length > 0 && (
+        <div className="border border-gray-800 rounded-lg p-4">
+          <h2 className="font-semibold mb-3">Run Output</h2>
+          <div className="space-y-4">
+            {run.artifacts.map((artifact: { type: string; content: string }, i: number) => (
+              <div key={i}>
+                <div className="text-xs text-gray-500 mb-2">{artifact.type}</div>
+                <pre className="text-sm text-gray-300 whitespace-pre-wrap font-mono bg-gray-900 p-4 rounded-lg overflow-x-auto max-h-96 overflow-y-auto">
+                  {artifact.content}
+                </pre>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Artifacts from artifacts table */}
       {artifactsData && artifactsData.data.length > 0 && (
         <div className="border border-gray-800 rounded-lg p-4">
           <h2 className="font-semibold mb-3">Artifacts Produced ({artifactsData.data.length})</h2>
@@ -213,9 +231,9 @@ export default function RunDetailPage() {
           <dt className="text-gray-500">Decision ID</dt>
           <dd className="font-mono">{run.decisionId}</dd>
           <dt className="text-gray-500">Trigger Type</dt>
-          <dd>{run.triggeredBy.type}</dd>
+          <dd>{typeof run.triggeredBy === 'string' ? run.triggeredBy : run.triggeredBy?.type || 'unknown'}</dd>
           <dt className="text-gray-500">Trigger Ref</dt>
-          <dd className="font-mono text-xs">{run.triggeredBy.ref}</dd>
+          <dd className="font-mono text-xs">{typeof run.triggeredBy === 'string' ? '-' : run.triggeredBy?.ref || '-'}</dd>
           <dt className="text-gray-500">Started</dt>
           <dd>{new Date(run.startedAt).toLocaleString()}</dd>
           <dt className="text-gray-500">Completed</dt>

@@ -7,6 +7,7 @@ import { api, type RunLog } from "@/lib/api";
 export default function PipelinePage() {
   const queryClient = useQueryClient();
   const [activeRunId, setActiveRunId] = useState<string | null>(null);
+  const [expandedRunId, setExpandedRunId] = useState<string | null>(null);
   const [scoutQuery, setScoutQuery] = useState("");
   const [scoutUrl, setScoutUrl] = useState("");
   const [verifyLimit, setVerifyLimit] = useState(5);
@@ -16,7 +17,7 @@ export default function PipelinePage() {
   const { data: runsData, isLoading: runsLoading } = useQuery({
     queryKey: ["pipeline-runs"],
     queryFn: () => api.getRuns({ limit: 20 }),
-    refetchInterval: activeRunId ? 2000 : false, // Poll when a run is active
+    refetchInterval: activeRunId ? 2000 : false,
   });
 
   // Fetch output for active run
@@ -24,7 +25,7 @@ export default function PipelinePage() {
     queryKey: ["pipeline-output", activeRunId],
     queryFn: () => activeRunId ? api.getPipelineRunOutput(activeRunId) : null,
     enabled: !!activeRunId,
-    refetchInterval: 1000, // Poll every second
+    refetchInterval: 1000,
   });
 
   // Scout mutation
@@ -36,6 +37,7 @@ export default function PipelinePage() {
     }),
     onSuccess: (data) => {
       setActiveRunId(data.data.runId);
+      setExpandedRunId(data.data.runId);
       setMessage({ type: "success", text: `Scout started: ${data.data.runId}` });
       queryClient.invalidateQueries({ queryKey: ["pipeline-runs"] });
     },
@@ -49,6 +51,7 @@ export default function PipelinePage() {
     mutationFn: () => api.runVerify({ limit: verifyLimit }),
     onSuccess: (data) => {
       setActiveRunId(data.data.runId);
+      setExpandedRunId(data.data.runId);
       setMessage({ type: "success", text: `Verify started: ${data.data.runId}` });
       queryClient.invalidateQueries({ queryKey: ["pipeline-runs"] });
     },
@@ -69,8 +72,8 @@ export default function PipelinePage() {
   // Clear active run when it completes
   useEffect(() => {
     if (outputData?.data?.status && outputData.data.status !== "running") {
-      // Run completed, stop polling after a delay
       const timer = setTimeout(() => {
+        setActiveRunId(null);
         queryClient.invalidateQueries({ queryKey: ["pipeline-runs"] });
         queryClient.invalidateQueries({ queryKey: ["patterns"] });
         queryClient.invalidateQueries({ queryKey: ["verifications"] });
@@ -182,73 +185,31 @@ export default function PipelinePage() {
         </div>
       </div>
 
-      {/* Live Output */}
-      {activeRunId && outputData?.data && (
-        <div className="border border-gray-800 rounded-lg p-4">
-          <div className="flex items-center justify-between mb-3">
-            <div className="flex items-center gap-3">
-              <h3 className="font-semibold">Live Output</h3>
-              <span className={`text-xs px-2 py-0.5 rounded ${
-                outputData.data.status === "running"
-                  ? "bg-yellow-900/50 text-yellow-300"
-                  : outputData.data.status === "success"
-                  ? "bg-green-900/50 text-green-300"
-                  : "bg-red-900/50 text-red-300"
-              }`}>
-                {outputData.data.status}
-              </span>
-            </div>
-            <div className="flex items-center gap-2">
-              {outputData.data.status === "running" && (
-                <button
-                  onClick={() => stopMutation.mutate(activeRunId)}
-                  className="text-xs px-2 py-1 bg-red-900/50 text-red-300 rounded hover:bg-red-900/70"
-                >
-                  Stop
-                </button>
-              )}
-              <button
-                onClick={() => setActiveRunId(null)}
-                className="text-gray-400 hover:text-white"
-              >
-                ×
-              </button>
-            </div>
-          </div>
-          <div className="bg-gray-900 rounded p-3 max-h-80 overflow-y-auto font-mono text-xs">
-            {outputData.data.output.length === 0 ? (
-              <span className="text-gray-500">Waiting for output...</span>
-            ) : (
-              outputData.data.output.map((line, i) => (
-                <div key={i} className={line.startsWith("[stderr]") ? "text-red-400" : "text-gray-300"}>
-                  {line}
-                </div>
-              ))
-            )}
-          </div>
-        </div>
-      )}
-
       {/* Recent Runs */}
-      <div className="border border-gray-800 rounded-lg p-4">
-        <h3 className="font-semibold mb-4">Recent Pipeline Runs</h3>
+      <div className="border border-gray-800 rounded-lg">
+        <div className="p-4 border-b border-gray-800">
+          <h3 className="font-semibold">Recent Pipeline Runs</h3>
+        </div>
 
         {runsLoading && (
-          <div className="text-gray-400 animate-pulse">Loading runs...</div>
+          <div className="p-4 text-gray-400 animate-pulse">Loading runs...</div>
         )}
 
         {pipelineRuns.length === 0 && !runsLoading && (
-          <p className="text-gray-500 text-sm">No pipeline runs yet. Run Scout or Verify to get started.</p>
+          <p className="p-4 text-gray-500 text-sm">No pipeline runs yet. Run Scout or Verify to get started.</p>
         )}
 
         {pipelineRuns.length > 0 && (
-          <div className="space-y-2">
+          <div className="divide-y divide-gray-800">
             {pipelineRuns.map((run) => (
-              <RunRow
+              <RunCard
                 key={run.id}
                 run={run}
+                isExpanded={run.id === expandedRunId}
                 isActive={run.id === activeRunId}
-                onSelect={() => setActiveRunId(run.id)}
+                liveOutput={run.id === activeRunId ? outputData?.data?.output : undefined}
+                onToggle={() => setExpandedRunId(expandedRunId === run.id ? null : run.id)}
+                onStop={() => stopMutation.mutate(run.id)}
               />
             ))}
           </div>
@@ -258,7 +219,21 @@ export default function PipelinePage() {
   );
 }
 
-function RunRow({ run, isActive, onSelect }: { run: RunLog; isActive: boolean; onSelect: () => void }) {
+function RunCard({
+  run,
+  isExpanded,
+  isActive,
+  liveOutput,
+  onToggle,
+  onStop,
+}: {
+  run: RunLog;
+  isExpanded: boolean;
+  isActive: boolean;
+  liveOutput?: string[];
+  onToggle: () => void;
+  onStop: () => void;
+}) {
   const statusColors: Record<string, string> = {
     running: "bg-yellow-900/50 text-yellow-300",
     success: "bg-green-900/50 text-green-300",
@@ -275,30 +250,188 @@ function RunRow({ run, isActive, onSelect }: { run: RunLog; isActive: boolean; o
     ? Math.round((new Date(run.completedAt).getTime() - new Date(run.startedAt).getTime()) / 1000)
     : null;
 
+  // Calculate LLM metrics
+  const llmCalls = run.llmCalls || [];
+  const totalTokens = llmCalls.reduce((sum, c) => sum + c.tokens.input + c.tokens.output, 0);
+  const totalLatency = llmCalls.reduce((sum, c) => sum + c.latencyMs, 0);
+
+  // Get output from artifacts
+  const output = run.artifacts?.find(a => a.type === "output")?.content || "";
+  const outputLines = output ? output.split("\n") : [];
+
+  // Use live output if available, otherwise use stored output
+  const displayOutput = isActive && liveOutput ? liveOutput : outputLines;
+
   return (
-    <div
-      className={`flex items-center justify-between p-3 rounded-lg cursor-pointer transition-colors ${
-        isActive ? "bg-blue-900/30 border border-blue-800" : "bg-gray-800/50 hover:bg-gray-800"
-      }`}
-      onClick={onSelect}
-    >
-      <div className="flex items-center gap-3">
-        <span>{agentIcons[run.agentId] || "▶"}</span>
-        <div>
-          <div className="font-medium capitalize">{run.agentId}</div>
-          <div className="text-xs text-gray-500">
-            {new Date(run.startedAt).toLocaleString()}
+    <div className={isActive ? "bg-blue-900/10" : ""}>
+      {/* Header Row */}
+      <div
+        className="flex items-center justify-between p-4 cursor-pointer hover:bg-gray-800/50 transition-colors"
+        onClick={onToggle}
+      >
+        <div className="flex items-center gap-3">
+          <span className="text-lg">{agentIcons[run.agentId] || "▶"}</span>
+          <div>
+            <div className="flex items-center gap-2">
+              <span className="font-medium capitalize">{run.agentId}</span>
+              {isActive && (
+                <span className="flex items-center gap-1 text-xs text-yellow-400">
+                  <span className="w-1.5 h-1.5 bg-yellow-400 rounded-full animate-pulse" />
+                  Live
+                </span>
+              )}
+            </div>
+            <div className="text-xs text-gray-500">
+              {new Date(run.startedAt).toLocaleString()}
+            </div>
           </div>
         </div>
+
+        <div className="flex items-center gap-4">
+          {/* LLM Stats (if available) */}
+          {llmCalls.length > 0 && (
+            <div className="hidden sm:flex items-center gap-4 text-xs text-gray-500">
+              <span>{llmCalls.length} calls</span>
+              <span>{totalTokens.toLocaleString()} tokens</span>
+              <span>{(totalLatency / 1000).toFixed(1)}s LLM</span>
+            </div>
+          )}
+
+          {duration !== null && (
+            <span className="text-sm text-gray-400">{duration}s</span>
+          )}
+
+          <span className={`text-xs px-2 py-0.5 rounded ${statusColors[run.runStatus] || "bg-gray-700"}`}>
+            {run.runStatus}
+          </span>
+
+          <span className={`text-gray-500 transition-transform ${isExpanded ? "rotate-180" : ""}`}>
+            ▼
+          </span>
+        </div>
       </div>
-      <div className="flex items-center gap-3">
-        {duration !== null && (
-          <span className="text-xs text-gray-500">{duration}s</span>
-        )}
-        <span className={`text-xs px-2 py-0.5 rounded ${statusColors[run.runStatus] || "bg-gray-700"}`}>
-          {run.runStatus}
-        </span>
-      </div>
+
+      {/* Expanded Details */}
+      {isExpanded && (
+        <div className="px-4 pb-4 space-y-4">
+          {/* Metrics Grid */}
+          {(llmCalls.length > 0 || duration) && (
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+              <MetricCard label="Duration" value={duration ? `${duration}s` : "-"} />
+              <MetricCard label="LLM Calls" value={llmCalls.length} />
+              <MetricCard label="Total Tokens" value={totalTokens.toLocaleString()} />
+              <MetricCard label="Avg Latency" value={llmCalls.length > 0 ? `${(totalLatency / llmCalls.length / 1000).toFixed(2)}s` : "-"} />
+            </div>
+          )}
+
+          {/* LLM Call Details */}
+          {llmCalls.length > 0 && (
+            <div className="space-y-2">
+              <h4 className="text-sm font-medium text-gray-400">LLM Calls</h4>
+              <div className="space-y-2">
+                {llmCalls.map((call, i) => {
+                  const inputTokens = call.tokens.input;
+                  const outputTokens = call.tokens.output;
+                  const maxTokens = Math.max(...llmCalls.map(c => c.tokens.input + c.tokens.output));
+                  const barWidth = ((inputTokens + outputTokens) / maxTokens) * 100;
+
+                  return (
+                    <div key={i} className="bg-gray-800/50 rounded p-3">
+                      <div className="flex items-center justify-between mb-2 text-sm">
+                        <span className="text-gray-300">{call.model}</span>
+                        <span className="text-gray-500">{(call.latencyMs / 1000).toFixed(2)}s</span>
+                      </div>
+                      <div className="h-2 bg-gray-700 rounded overflow-hidden mb-1">
+                        <div className="h-full flex">
+                          <div
+                            className="bg-blue-500 h-full"
+                            style={{ width: `${(inputTokens / (inputTokens + outputTokens)) * barWidth}%` }}
+                          />
+                          <div
+                            className="bg-green-500 h-full"
+                            style={{ width: `${(outputTokens / (inputTokens + outputTokens)) * barWidth}%` }}
+                          />
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-4 text-xs text-gray-500">
+                        <span className="flex items-center gap-1">
+                          <span className="w-2 h-2 rounded bg-blue-500" />
+                          In: {inputTokens.toLocaleString()}
+                        </span>
+                        <span className="flex items-center gap-1">
+                          <span className="w-2 h-2 rounded bg-green-500" />
+                          Out: {outputTokens.toLocaleString()}
+                        </span>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          {/* Error */}
+          {run.error && (
+            <div className="bg-red-900/20 border border-red-800 rounded p-3">
+              <h4 className="text-sm font-medium text-red-400 mb-1">Error</h4>
+              <pre className="text-xs text-red-300 whitespace-pre-wrap">{run.error}</pre>
+            </div>
+          )}
+
+          {/* Output */}
+          {displayOutput.length > 0 && (
+            <div>
+              <div className="flex items-center justify-between mb-2">
+                <h4 className="text-sm font-medium text-gray-400">Output</h4>
+                {isActive && run.runStatus === "running" && (
+                  <button
+                    onClick={(e) => { e.stopPropagation(); onStop(); }}
+                    className="text-xs px-2 py-1 bg-red-900/50 text-red-300 rounded hover:bg-red-900/70"
+                  >
+                    Stop
+                  </button>
+                )}
+              </div>
+              <div className="bg-gray-900 rounded p-3 max-h-64 overflow-y-auto font-mono text-xs">
+                {displayOutput.map((line, i) => (
+                  <div
+                    key={i}
+                    className={
+                      line.startsWith("[stderr]")
+                        ? "text-red-400"
+                        : line.startsWith("✅") || line.startsWith("✓")
+                        ? "text-green-400"
+                        : line.startsWith("❌") || line.startsWith("✗")
+                        ? "text-red-400"
+                        : line.startsWith("📌") || line.startsWith("✨")
+                        ? "text-blue-300"
+                        : "text-gray-300"
+                    }
+                  >
+                    {line}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Metadata */}
+          <div className="text-xs text-gray-500 flex flex-wrap gap-x-4 gap-y-1">
+            <span>ID: <span className="font-mono">{run.id}</span></span>
+            <span>Started: {new Date(run.startedAt).toLocaleString()}</span>
+            {run.completedAt && <span>Completed: {new Date(run.completedAt).toLocaleString()}</span>}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function MetricCard({ label, value }: { label: string; value: string | number }) {
+  return (
+    <div className="bg-gray-800/50 rounded p-3 text-center">
+      <div className="text-lg font-semibold text-gray-100">{value}</div>
+      <div className="text-xs text-gray-500">{label}</div>
     </div>
   );
 }

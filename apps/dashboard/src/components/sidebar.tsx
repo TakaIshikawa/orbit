@@ -42,7 +42,6 @@ const navSections: NavSection[] = [
     items: [
       { href: "/sources", label: "Sources", icon: "🌐" },
       { href: "/feedback", label: "Feedback", icon: "🔄" },
-      { href: "/runs", label: "Runs", icon: "▶" },
       { href: "/agents", label: "Agents", icon: "⚙" },
     ],
   },

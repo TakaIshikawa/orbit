@@ -111,6 +111,76 @@ export default function SourcesPage() {
         </div>
       )}
 
+      {/* Source Health Grid (Top sources with trend) */}
+      {sources.length > 0 && (
+        <div>
+          <h2 className="text-sm font-medium text-gray-400 mb-3">SOURCES HEALTH OVERVIEW</h2>
+          <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-3">
+            {sources.slice(0, 12).map((source) => (
+              <SourceHealthCard key={source.id} source={source} />
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Verification Accuracy Section */}
+      {sources.length > 0 && (
+        <div className="border border-gray-800 rounded-lg overflow-hidden">
+          <div className="bg-gray-800/50 px-4 py-3">
+            <h2 className="font-semibold">Verification Accuracy</h2>
+            <p className="text-xs text-gray-500">Source reliability based on verification results</p>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead className="bg-gray-900">
+                <tr>
+                  <th className="text-left p-3 font-medium">Source</th>
+                  <th className="text-center p-3 font-medium">Verified</th>
+                  <th className="text-center p-3 font-medium">Corroborated</th>
+                  <th className="text-center p-3 font-medium">Contested</th>
+                  <th className="text-center p-3 font-medium">Accuracy</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-800">
+                {sources.filter(s => s.totalVerifications > 0).slice(0, 10).map((source) => {
+                  const accuracy = source.totalVerifications > 0
+                    ? (source.corroboratedCount / source.totalVerifications * 100)
+                    : null;
+                  return (
+                    <tr key={source.id} className="hover:bg-gray-800/30">
+                      <td className="p-3">
+                        <Link href={`/sources/${encodeURIComponent(source.domain)}`} className="text-blue-400 hover:underline">
+                          {source.domain}
+                        </Link>
+                      </td>
+                      <td className="p-3 text-center text-gray-400">{source.totalVerifications}</td>
+                      <td className="p-3 text-center text-green-400">{source.corroboratedCount}</td>
+                      <td className="p-3 text-center text-red-400">{source.contestedCount}</td>
+                      <td className="p-3 text-center">
+                        {accuracy !== null ? (
+                          <span className={accuracy >= 80 ? "text-green-400" : accuracy >= 60 ? "text-yellow-400" : "text-red-400"}>
+                            {accuracy.toFixed(0)}%
+                          </span>
+                        ) : (
+                          <span className="text-gray-500">—</span>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
+                {sources.filter(s => s.totalVerifications > 0).length === 0 && (
+                  <tr>
+                    <td colSpan={5} className="p-4 text-center text-gray-500">
+                      No verification data available yet
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
       {/* Active Alerts */}
       {alerts.length > 0 && (
         <div className="border border-red-800 bg-red-900/10 rounded-lg p-4">
@@ -224,6 +294,54 @@ function SummaryCard({
         {value}
       </div>
     </div>
+  );
+}
+
+function SourceHealthCard({ source }: { source: SourceHealth }) {
+  const healthColors: Record<string, { bg: string; text: string; indicator: string }> = {
+    healthy: { bg: "border-green-800", text: "text-green-400", indicator: "bg-green-500" },
+    degraded: { bg: "border-yellow-800", text: "text-yellow-400", indicator: "bg-yellow-500" },
+    unhealthy: { bg: "border-red-800", text: "text-red-400", indicator: "bg-red-500" },
+    unknown: { bg: "border-gray-700", text: "text-gray-400", indicator: "bg-gray-500" },
+  };
+
+  const colors = healthColors[source.healthStatus] || healthColors.unknown;
+  const reliability = source.dynamicReliability !== null
+    ? Math.round(source.dynamicReliability * 100)
+    : null;
+
+  // Calculate a pseudo-trend based on comparing dynamic vs base reliability
+  const trend = source.dynamicReliability !== null && source.baseReliability !== null
+    ? source.dynamicReliability - source.baseReliability
+    : null;
+
+  return (
+    <Link
+      href={`/sources/${encodeURIComponent(source.domain)}`}
+      className={`block border ${colors.bg} rounded-lg p-3 hover:bg-gray-800/30 transition-colors`}
+    >
+      <div className="flex items-center gap-2 mb-2">
+        <span className={`w-2 h-2 rounded-full ${colors.indicator}`} />
+        <span className="text-xs font-medium truncate flex-1" title={source.domain}>
+          {source.domain.length > 15 ? `${source.domain.slice(0, 12)}...` : source.domain}
+        </span>
+      </div>
+      <div className="flex items-baseline justify-between">
+        <span className={`text-xl font-bold ${colors.text}`}>
+          {reliability !== null ? `${reliability}%` : "—"}
+        </span>
+        {trend !== null && Math.abs(trend) > 0.01 && (
+          <span className={`text-xs flex items-center ${trend > 0 ? "text-green-400" : "text-red-400"}`}>
+            {trend > 0 ? "↑" : "↓"} {Math.abs(Math.round(trend * 100))}%
+          </span>
+        )}
+      </div>
+      {source.alertActive && (
+        <div className="mt-1 text-xs text-red-400 truncate">
+          ! {source.alertReason}
+        </div>
+      )}
+    </Link>
   );
 }
 

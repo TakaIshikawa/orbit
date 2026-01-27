@@ -39,6 +39,8 @@ export interface Pattern {
 }
 
 // Issue types
+export type SimpleStatus = "needs_attention" | "being_worked" | "blocked" | "watching" | "resolved";
+
 export interface Issue {
   id: string;
   contentHash: string;
@@ -48,6 +50,12 @@ export interface Issue {
   status: string;
   title: string;
   summary: string;
+  // Condensed display fields (human-readable summaries)
+  headline?: string | null;
+  whyNow?: string | null;
+  keyNumber?: string | null;
+  simpleStatus?: SimpleStatus | null;
+  // Core fields
   patternIds: string[];
   affectedDomains: string[];
   rootCauses: string[];
@@ -93,6 +101,41 @@ export interface Solution {
   impactScore?: number;
   confidence?: number;
   solutionStatus: string;
+  assignedTo?: string | null;
+  assignedAt?: string | null;
+}
+
+// Dashboard types
+export interface ActionableIssue extends Issue {
+  actionability: number;
+  solutionCount: number;
+  hasFeasibleSolution: boolean;
+}
+
+export interface ActiveWorkSolution extends Solution {
+  daysSinceStarted: number | null;
+}
+
+export interface SolutionWithEffectiveness extends Solution {
+  effectiveness: {
+    overallScore: number | null;
+    metricsAchieved: number;
+    metricsMissed: number;
+    impactVariance: number | null;
+  } | null;
+}
+
+export interface DashboardSummary {
+  topActionableIssues: ActionableIssue[];
+  activeWork: ActiveWorkSolution[];
+  recentOutcomes: SolutionWithEffectiveness[];
+}
+
+export interface MyWork {
+  inProgress: ActiveWorkSolution[];
+  completed: SolutionWithEffectiveness[];
+  totalInProgress: number;
+  totalCompleted: number;
 }
 
 // RunLog types
@@ -641,6 +684,34 @@ class ApiClient {
     });
   }
 
+  async summarizeIssue(id: string): Promise<{
+    data: {
+      issue: Issue;
+      summary: {
+        headline: string;
+        whyNow: string;
+        keyNumber: string;
+        simpleStatus: SimpleStatus;
+      };
+    };
+  }> {
+    return this.request(`/issues/${id}/summarize`, {
+      method: "POST",
+    });
+  }
+
+  async summarizeAllIssues(): Promise<{
+    data: {
+      processed: number;
+      total: number;
+      results: Array<{ id: string; headline: string; error?: string }>;
+    };
+  }> {
+    return this.request("/issues/summarize-all", {
+      method: "POST",
+    });
+  }
+
   // Solutions
   async getSolutions(params?: {
     limit?: number;
@@ -1148,6 +1219,54 @@ class ApiClient {
     });
   }
 
+  // Dashboard Summary
+  async getDashboardSummary(): Promise<SingleResponse<DashboardSummary>> {
+    return this.request("/dashboard/summary");
+  }
+
+  async getMyWork(userId: string): Promise<SingleResponse<MyWork>> {
+    const searchParams = new URLSearchParams();
+    searchParams.set("userId", userId);
+    return this.request(`/dashboard/my-work?${searchParams.toString()}`);
+  }
+
+  // Solution Assignment
+  async assignSolution(solutionId: string, userId: string): Promise<SingleResponse<Solution>> {
+    return this.request(`/solutions/${solutionId}/assign`, {
+      method: "POST",
+      body: JSON.stringify({ userId }),
+    });
+  }
+
+  async unassignSolution(solutionId: string): Promise<SingleResponse<Solution>> {
+    return this.request(`/solutions/${solutionId}/unassign`, {
+      method: "POST",
+    });
+  }
+
+  async updateSolutionStatus(solutionId: string, status: "proposed" | "approved" | "in_progress" | "completed" | "abandoned"): Promise<SingleResponse<Solution>> {
+    return this.request(`/solutions/${solutionId}/status`, {
+      method: "PATCH",
+      body: JSON.stringify({ status }),
+    });
+  }
+
+  // Outcomes
+  async getSolutionOutcomes(solutionId: string): Promise<PaginatedResponse<Outcome>> {
+    return this.request(`/solutions/${solutionId}/outcomes`);
+  }
+
+  async recordOutcome(solutionId: string, data: OutcomeCreateInput): Promise<SingleResponse<Outcome>> {
+    return this.request(`/solutions/${solutionId}/outcomes`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async getSolutionEffectiveness(solutionId: string): Promise<SingleResponse<SolutionEffectiveness>> {
+    return this.request(`/solutions/${solutionId}/effectiveness`);
+  }
+
   // Pipeline Commands
   async getPipelineCommands(): Promise<{ data: PipelineCommand[] }> {
     return this.request("/pipeline/commands");
@@ -1184,6 +1303,45 @@ class ApiClient {
   async stopPipelineRun(runId: string): Promise<{ data: { runId: string; status: string; message: string } }> {
     return this.request(`/pipeline/runs/${runId}/stop`, { method: "POST" });
   }
+}
+
+// Outcome types
+export interface Outcome {
+  id: string;
+  solutionId: string;
+  outcomeType: "metric_measurement" | "status_change" | "feedback" | "milestone";
+  metricName?: string;
+  metricValue?: number;
+  metricTarget?: number;
+  metricBaseline?: number;
+  feedbackText?: string;
+  feedbackSentiment?: number; // -1 to 1
+  notes?: string;
+  recordedAt: string;
+  recordedBy: string;
+  createdAt: string;
+}
+
+export interface OutcomeCreateInput {
+  outcomeType: "metric_measurement" | "status_change" | "feedback" | "milestone";
+  metricName?: string;
+  metricValue?: number;
+  metricTarget?: number;
+  metricBaseline?: number;
+  feedbackText?: string;
+  feedbackSentiment?: number;
+  notes?: string;
+}
+
+export interface SolutionEffectiveness {
+  solutionId: string;
+  overallEffectivenessScore: number | null;
+  metricsAchieved: number;
+  metricsPartial: number;
+  metricsMissed: number;
+  impactVariance: number | null;
+  outcomeCount: number;
+  latestOutcome?: Outcome;
 }
 
 // Pipeline types

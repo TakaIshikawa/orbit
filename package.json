@@ -20,6 +20,7 @@
     "db:migrate": "npm run --workspace=@orbit/db db:migrate",
     "db:generate": "npm run --workspace=@orbit/db db:generate",
     "db:seed": "npm run --workspace=@orbit/db db:seed",
+    "db:reset": "npm run --workspace=@orbit/db db:reset",
     "scout": "npm run --workspace=@orbit/runner scout",
     "scheduler": "npm run --workspace=@orbit/runner scheduler"
   },

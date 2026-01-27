@@ -5,6 +5,7 @@ import {
   api,
   FeedbackEvent,
   ConfidenceAdjustment,
+  SystemLearning,
 } from "@/lib/api";
 import { useState } from "react";
 
@@ -31,6 +32,11 @@ export default function FeedbackPage() {
   const { data: adjustmentStatsData } = useQuery({
     queryKey: ["adjustmentStats"],
     queryFn: () => api.getAdjustmentStats({ days: 7 }),
+  });
+
+  const { data: learningsData, isLoading: learningsLoading } = useQuery({
+    queryKey: ["systemLearnings"],
+    queryFn: () => api.getSystemLearnings({ limit: 20 }),
   });
 
   const applyAdjustmentsMutation = useMutation({
@@ -230,6 +236,97 @@ export default function FeedbackPage() {
               </div>
             ))}
           </div>
+        </div>
+      )}
+
+      {/* System Learnings */}
+      <div className="border border-zinc-700 rounded-lg overflow-hidden">
+        <div className="bg-purple-500/10 border-b border-zinc-700 px-4 py-3">
+          <h3 className="font-semibold text-purple-400">System Learnings</h3>
+          <p className="text-xs text-zinc-400">Patterns discovered from feedback processing</p>
+        </div>
+        <div className="p-4">
+          {learningsLoading ? (
+            <div className="text-center text-zinc-400 py-4">Loading learnings...</div>
+          ) : learningsData?.data && learningsData.data.length > 0 ? (
+            <div className="space-y-4">
+              {/* Group learnings by category */}
+              {groupLearningsByCategory(learningsData.data).map(([category, learnings]) => (
+                <div key={category} className="border border-zinc-800 rounded-lg p-3">
+                  <h4 className="text-sm font-medium text-zinc-300 mb-2 capitalize">
+                    {category.replace(/_/g, " ")}
+                  </h4>
+                  <div className="space-y-2">
+                    {learnings.slice(0, 3).map((learning) => (
+                      <LearningRow key={learning.id} learning={learning} />
+                    ))}
+                    {learnings.length > 3 && (
+                      <p className="text-xs text-zinc-500">+{learnings.length - 3} more learnings</p>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="text-center text-zinc-500 py-4">
+              <p>No learnings yet</p>
+              <p className="text-xs mt-1">Process more feedback events to discover patterns</p>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function groupLearningsByCategory(learnings: SystemLearning[]): [string, SystemLearning[]][] {
+  const groups: Record<string, SystemLearning[]> = {};
+  for (const learning of learnings) {
+    const category = learning.category || "other";
+    if (!groups[category]) {
+      groups[category] = [];
+    }
+    groups[category].push(learning);
+  }
+  return Object.entries(groups);
+}
+
+function LearningRow({ learning }: { learning: SystemLearning }) {
+  const successRate = learning.successRate !== null
+    ? Math.round(learning.successRate * 100)
+    : null;
+
+  return (
+    <div className="bg-zinc-800/50 rounded p-2">
+      <div className="flex items-start justify-between gap-3">
+        <div className="flex-1 min-w-0">
+          <div className="text-sm text-zinc-200 font-medium">{learning.learningKey}</div>
+          {learning.insights && learning.insights.length > 0 && (
+            <div className="mt-1 text-xs text-zinc-400 line-clamp-2">
+              {learning.insights[0].insight}
+            </div>
+          )}
+        </div>
+        <div className="text-right shrink-0">
+          {successRate !== null && (
+            <div className={`text-sm font-medium ${
+              successRate >= 70 ? "text-green-400" :
+              successRate >= 40 ? "text-yellow-400" : "text-red-400"
+            }`}>
+              {successRate}%
+            </div>
+          )}
+          <div className="text-xs text-zinc-500">
+            n={learning.sampleSize}
+          </div>
+        </div>
+      </div>
+      {learning.avgConfidence !== null && (
+        <div className="mt-2 flex gap-4 text-xs text-zinc-500">
+          <span>Avg confidence: {(learning.avgConfidence * 100).toFixed(0)}%</span>
+          {learning.avgEffectiveness !== null && (
+            <span>Avg effectiveness: {(learning.avgEffectiveness * 100).toFixed(0)}%</span>
+          )}
         </div>
       )}
     </div>

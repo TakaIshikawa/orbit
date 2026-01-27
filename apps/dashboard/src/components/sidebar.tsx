@@ -29,7 +29,7 @@ const navSections: NavSection[] = [
       { href: "/playbooks", label: "Run Pipeline", icon: "▶" },
       { href: "/sources", label: "Sources", icon: "🌐" },
       { href: "/patterns", label: "Patterns", icon: "◈" },
-      { href: "/issues", label: "Issues / Solutions", icon: "!" },
+      { href: "/issues", label: "Issues", icon: "!" },
       { href: "/feedback", label: "Feedback", icon: "🔄" },
     ],
   },

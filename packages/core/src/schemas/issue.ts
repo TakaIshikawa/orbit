@@ -21,12 +21,27 @@ export const IssueStatusSchema = z.enum([
   "wont_fix",
 ]);
 
+// Simple status for condensed UI display
+export const SimpleStatusSchema = z.enum([
+  "needs_attention",  // No one working on it, high priority
+  "being_worked",     // Active solutions in progress
+  "blocked",          // Stuck, needs input
+  "watching",         // Monitoring, not urgent
+  "resolved",         // Done
+]);
+
 export const IssueSchema = BaseRecordSchema.extend({
   type: z.literal("Issue"),
 
   // Identity
   title: z.string().min(1).max(200),
   summary: z.string().min(1),
+
+  // Condensed display (for human-readable UI)
+  headline: z.string().max(150).optional(),        // One sentence, specific, no jargon
+  whyNow: z.string().max(500).optional(),          // Why this matters now / time-sensitivity
+  keyNumber: z.string().max(100).optional(),       // Anchor statistic ("500K firms affected")
+  simpleStatus: SimpleStatusSchema.optional(),     // Simplified status for UI
 
   // Source
   patternIds: z.array(z.string()),
@@ -57,6 +72,7 @@ export type IUTLNScores = z.infer<typeof IUTLNScoresSchema>;
 export type TimeHorizon = z.infer<typeof TimeHorizonSchema>;
 export type PropagationVelocity = z.infer<typeof PropagationVelocitySchema>;
 export type IssueStatus = z.infer<typeof IssueStatusSchema>;
+export type SimpleStatus = z.infer<typeof SimpleStatusSchema>;
 export type Issue = z.infer<typeof IssueSchema>;
 
 // Compute composite score from IUTLN

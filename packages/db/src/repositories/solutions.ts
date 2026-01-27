@@ -113,4 +113,85 @@ export class SolutionRepository extends BaseRepository<typeof solutions, Solutio
       offset,
     };
   }
+
+  async findInProgress(options: ListOptions = {}): Promise<PaginatedResult<SolutionRow>> {
+    const { limit = 20, offset = 0 } = options;
+
+    const data = await this.db
+      .select()
+      .from(solutions)
+      .where(eq(solutions.solutionStatus, "in_progress"))
+      .orderBy(desc(solutions.createdAt))
+      .limit(limit)
+      .offset(offset);
+
+    const countResult = await this.db
+      .select({ count: solutions.id })
+      .from(solutions)
+      .where(eq(solutions.solutionStatus, "in_progress"));
+
+    return {
+      data,
+      total: countResult.length,
+      limit,
+      offset,
+    };
+  }
+
+  async findByAssignedTo(
+    userId: string,
+    options: ListOptions = {}
+  ): Promise<PaginatedResult<SolutionRow>> {
+    const { limit = 20, offset = 0 } = options;
+
+    const data = await this.db
+      .select()
+      .from(solutions)
+      .where(eq(solutions.assignedTo, userId))
+      .orderBy(desc(solutions.createdAt))
+      .limit(limit)
+      .offset(offset);
+
+    const countResult = await this.db
+      .select({ count: solutions.id })
+      .from(solutions)
+      .where(eq(solutions.assignedTo, userId));
+
+    return {
+      data,
+      total: countResult.length,
+      limit,
+      offset,
+    };
+  }
+
+  async assignSolution(
+    id: string,
+    userId: string
+  ): Promise<SolutionRow | null> {
+    const result = await this.db
+      .update(solutions)
+      .set({
+        assignedTo: userId,
+        assignedAt: new Date(),
+        solutionStatus: "in_progress",
+      })
+      .where(eq(solutions.id, id))
+      .returning();
+
+    return result[0] ?? null;
+  }
+
+  async unassignSolution(id: string): Promise<SolutionRow | null> {
+    const result = await this.db
+      .update(solutions)
+      .set({
+        assignedTo: null,
+        assignedAt: null,
+      })
+      .where(eq(solutions.id, id))
+      .returning();
+
+    return result[0] ?? null;
+  }
 }

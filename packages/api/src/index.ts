@@ -26,6 +26,7 @@ import { schedulerRoutes } from "./routes/scheduler.js";
 import { feedbackRoutes } from "./routes/feedback.js";
 import { sourcesRoutes } from "./routes/sources.js";
 import { pipelineRoutes } from "./routes/pipeline.js";
+import { dashboardRoutes } from "./routes/dashboard.js";
 import { setupWebSocket } from "./events/index.js";
 
 const app = new Hono();
@@ -51,6 +52,7 @@ app.route("/scheduler", schedulerRoutes);
 app.route("/feedback", feedbackRoutes);
 app.route("/sources", sourcesRoutes);
 app.route("/pipeline", pipelineRoutes);
+app.route("/dashboard", dashboardRoutes);
 
 // 404 handler
 app.notFound((c) => {

@@ -55,6 +55,10 @@ export const solutions = pgTable("solutions", {
   confidence: real("confidence"),
 
   solutionStatus: solutionStatusEnum("solution_status").notNull().default("proposed"),
+
+  // Assignment fields for tracking who is working on the solution
+  assignedTo: text("assigned_to"),
+  assignedAt: timestamp("assigned_at", { withTimezone: true }),
 });
 
 export type SolutionRow = typeof solutions.$inferSelect;

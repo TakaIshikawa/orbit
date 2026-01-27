@@ -281,3 +281,49 @@ solutionsRoutes.get("/:id/effectiveness", async (c) => {
 
   return c.json({ data: effectiveness });
 });
+
+// Assign solution to a user
+const assignSolutionSchema = z.object({
+  userId: z.string(),
+});
+
+solutionsRoutes.post("/:id/assign", zValidator("json", assignSolutionSchema), async (c) => {
+  const id = c.req.param("id");
+  const { userId } = c.req.valid("json");
+
+  const db = getDatabase();
+  const repo = new SolutionRepository(db);
+
+  const solution = await repo.assignSolution(id, userId);
+
+  if (!solution) {
+    return c.json({ error: { code: "NOT_FOUND", message: "Solution not found" } }, 404);
+  }
+
+  eventBus.publish("solution.updated", { solution });
+
+  return c.json({ data: solution });
+});
+
+// Unassign solution
+solutionsRoutes.post("/:id/unassign", async (c) => {
+  const id = c.req.param("id");
+
+  const db = getDatabase();
+  const repo = new SolutionRepository(db);
+
+  const existing = await repo.findById(id);
+  if (!existing) {
+    return c.json({ error: { code: "NOT_FOUND", message: "Solution not found" } }, 404);
+  }
+
+  const solution = await repo.unassignSolution(id);
+
+  if (!solution) {
+    return c.json({ error: { code: "UPDATE_FAILED", message: "Failed to unassign solution" } }, 500);
+  }
+
+  eventBus.publish("solution.updated", { solution });
+
+  return c.json({ data: solution });
+});

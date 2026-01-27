@@ -1,8 +1,9 @@
 import { Hono } from "hono";
 import { zValidator } from "@hono/zod-validator";
 import { z } from "zod";
-import { getDatabase, IssueRepository } from "@orbit/db";
+import { getDatabase, IssueRepository, PatternRepository, SolutionRepository } from "@orbit/db";
 import { CreateIssueInputSchema, generateId, computeContentHash, computeCompositeScore } from "@orbit/core";
+import { generateIssueSummary, type IssueSummaryInput } from "@orbit/agent";
 import { eventBus } from "../events/index.js";
 
 export const issuesRoutes = new Hono();
@@ -195,4 +196,122 @@ issuesRoutes.patch("/:id", zValidator("json", updateIssueSchema), async (c) => {
   eventBus.publish("issue.updated", { issue: updated });
 
   return c.json({ data: updated });
+});
+
+// Generate/regenerate summary for an issue
+issuesRoutes.post("/:id/summarize", async (c) => {
+  const id = c.req.param("id");
+
+  const db = getDatabase();
+  const issueRepo = new IssueRepository(db);
+  const patternRepo = new PatternRepository(db);
+  const solutionRepo = new SolutionRepository(db);
+
+  const issue = await issueRepo.findById(id);
+  if (!issue) {
+    return c.json({ error: { code: "NOT_FOUND", message: "Issue not found" } }, 404);
+  }
+
+  // Get related patterns for context
+  let patterns: Array<{ title: string; description: string }> = [];
+  if (issue.patternIds && issue.patternIds.length > 0) {
+    const patternResults = await Promise.all(
+      issue.patternIds.slice(0, 5).map(pid => patternRepo.findById(pid))
+    );
+    patterns = patternResults
+      .filter((p): p is NonNullable<typeof p> => p !== null)
+      .map(p => ({ title: p.title, description: p.description }));
+  }
+
+  // Get solution counts
+  const solutions = await solutionRepo.findByFilters({ issueId: id }, { limit: 100 });
+  const activeSolutions = solutions.data.filter(s => s.solutionStatus === "in_progress");
+
+  // Build input for summarization
+  const summaryInput: IssueSummaryInput = {
+    title: issue.title,
+    summary: issue.summary,
+    rootCauses: issue.rootCauses || [],
+    affectedDomains: issue.affectedDomains,
+    scoreImpact: issue.scoreImpact,
+    scoreUrgency: issue.scoreUrgency,
+    scoreTractability: issue.scoreTractability,
+    scoreNeglectedness: issue.scoreNeglectedness,
+    patterns,
+    solutionCount: solutions.total,
+    activeSolutionCount: activeSolutions.length,
+    issueStatus: issue.issueStatus,
+  };
+
+  // Generate summary
+  const summary = await generateIssueSummary(summaryInput);
+
+  // Update issue with summary fields
+  const updated = await issueRepo.update(id, {
+    headline: summary.headline,
+    whyNow: summary.whyNow,
+    keyNumber: summary.keyNumber,
+    simpleStatus: summary.simpleStatus,
+  });
+
+  return c.json({
+    data: {
+      issue: updated,
+      summary,
+    },
+  });
+});
+
+// Batch summarize all issues (or issues without summaries)
+issuesRoutes.post("/summarize-all", async (c) => {
+  const db = getDatabase();
+  const issueRepo = new IssueRepository(db);
+
+  // Get issues without headlines
+  const issues = await issueRepo.findByFilters({}, { limit: 100 });
+  const needsSummary = issues.data.filter(i => !i.headline);
+
+  const results: Array<{ id: string; headline: string; error?: string }> = [];
+
+  for (const issue of needsSummary.slice(0, 10)) { // Limit to 10 at a time
+    try {
+      // Call the individual summarize endpoint logic
+      const summaryInput: IssueSummaryInput = {
+        title: issue.title,
+        summary: issue.summary,
+        rootCauses: issue.rootCauses || [],
+        affectedDomains: issue.affectedDomains,
+        scoreImpact: issue.scoreImpact,
+        scoreUrgency: issue.scoreUrgency,
+        scoreTractability: issue.scoreTractability,
+        scoreNeglectedness: issue.scoreNeglectedness,
+        issueStatus: issue.issueStatus,
+      };
+
+      const summary = await generateIssueSummary(summaryInput);
+
+      await issueRepo.update(issue.id, {
+        headline: summary.headline,
+        whyNow: summary.whyNow,
+        keyNumber: summary.keyNumber,
+        simpleStatus: summary.simpleStatus,
+      });
+
+      results.push({ id: issue.id, headline: summary.headline });
+    } catch (error) {
+      results.push({
+        id: issue.id,
+        headline: "",
+        error: error instanceof Error ? error.message : "Unknown error",
+      });
+    }
+  }
+
+  return c.json({
+    data: {
+      processed: results.length,
+      total: needsSummary.length,
+      results,
+    },
+  });
 });

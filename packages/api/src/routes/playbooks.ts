@@ -33,6 +33,49 @@ playbooksRoutes.get("/", zValidator("query", listQuerySchema), async (c) => {
   });
 });
 
+// Get all recent executions - MUST be before /:id routes to avoid matching "executions" as an ID
+playbooksRoutes.get("/executions", async (c) => {
+  const limit = Number(c.req.query("limit") || "20");
+  const offset = Number(c.req.query("offset") || "0");
+
+  const db = getDatabase();
+  const executionRepo = new PlaybookExecutionRepository(db);
+
+  const result = await executionRepo.findMany({ limit, offset });
+
+  return c.json({
+    data: result.data,
+    meta: {
+      total: result.total,
+      limit: result.limit,
+      offset: result.offset,
+    },
+  });
+});
+
+// Get execution details - MUST be before /:id routes
+playbooksRoutes.get("/executions/:execId", async (c) => {
+  const execId = c.req.param("execId");
+
+  const db = getDatabase();
+  const executionRepo = new PlaybookExecutionRepository(db);
+  const stepRepo = new PlaybookStepExecutionRepository(db);
+
+  const execution = await executionRepo.findById(execId);
+  if (!execution) {
+    return c.json({ error: { code: "NOT_FOUND", message: "Execution not found" } }, 404);
+  }
+
+  const steps = await stepRepo.findByExecution(execId);
+
+  return c.json({
+    data: {
+      ...execution,
+      steps,
+    },
+  });
+});
+
 playbooksRoutes.get("/:id", async (c) => {
   const id = c.req.param("id");
 
@@ -250,7 +293,7 @@ playbooksRoutes.delete("/:id", async (c) => {
   return c.json({ data: { deleted: true, id } });
 });
 
-// Get playbook executions
+// Get playbook executions (for a specific playbook)
 playbooksRoutes.get("/:id/executions", async (c) => {
   const id = c.req.param("id");
   const limit = Number(c.req.query("limit") || "20");
@@ -260,49 +303,6 @@ playbooksRoutes.get("/:id/executions", async (c) => {
   const executionRepo = new PlaybookExecutionRepository(db);
 
   const result = await executionRepo.findByPlaybook(id, { limit, offset });
-
-  return c.json({
-    data: result.data,
-    meta: {
-      total: result.total,
-      limit: result.limit,
-      offset: result.offset,
-    },
-  });
-});
-
-// Get execution details
-playbooksRoutes.get("/executions/:execId", async (c) => {
-  const execId = c.req.param("execId");
-
-  const db = getDatabase();
-  const executionRepo = new PlaybookExecutionRepository(db);
-  const stepRepo = new PlaybookStepExecutionRepository(db);
-
-  const execution = await executionRepo.findById(execId);
-  if (!execution) {
-    return c.json({ error: { code: "NOT_FOUND", message: "Execution not found" } }, 404);
-  }
-
-  const steps = await stepRepo.findByExecution(execId);
-
-  return c.json({
-    data: {
-      ...execution,
-      steps,
-    },
-  });
-});
-
-// Get all recent executions
-playbooksRoutes.get("/executions", async (c) => {
-  const limit = Number(c.req.query("limit") || "20");
-  const offset = Number(c.req.query("offset") || "0");
-
-  const db = getDatabase();
-  const executionRepo = new PlaybookExecutionRepository(db);
-
-  const result = await executionRepo.findMany({ limit, offset });
 
   return c.json({
     data: result.data,

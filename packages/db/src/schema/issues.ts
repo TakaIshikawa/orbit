@@ -14,6 +14,14 @@ export const issueStatusEnum = pgEnum("issue_status", [
   "wont_fix",
 ]);
 
+export const simpleStatusEnum = pgEnum("simple_status", [
+  "needs_attention",
+  "being_worked",
+  "blocked",
+  "watching",
+  "resolved",
+]);
+
 export const issues = pgTable("issues", {
   // Base record fields
   id: text("id").primaryKey(),
@@ -29,6 +37,12 @@ export const issues = pgTable("issues", {
   title: text("title").notNull(),
   summary: text("summary").notNull(),
   patternIds: jsonb("pattern_ids").$type<string[]>().notNull().default([]),
+
+  // Condensed display (human-readable summaries for UI)
+  headline: text("headline"),                           // One sentence, specific, no jargon
+  whyNow: text("why_now"),                              // Time-sensitivity explanation
+  keyNumber: text("key_number"),                        // Anchor statistic ("500K firms")
+  simpleStatus: simpleStatusEnum("simple_status"),      // Simplified status for UI
 
   // Systemic framing
   rootCauses: jsonb("root_causes").$type<string[]>().notNull().default([]),

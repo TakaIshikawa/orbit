@@ -20,17 +20,11 @@ const navSections: NavSection[] = [
   {
     title: "",
     items: [
-      { href: "/", label: "Dashboard", icon: "◉" },
-    ],
-  },
-  {
-    title: "Pipeline",
-    items: [
-      { href: "/playbooks", label: "Run Pipeline", icon: "▶" },
-      { href: "/sources", label: "Sources", icon: "🌐" },
-      { href: "/patterns", label: "Patterns", icon: "◈" },
+      { href: "/", label: "Home", icon: "◉" },
       { href: "/issues", label: "Issues", icon: "!" },
-      { href: "/feedback", label: "Feedback", icon: "🔄" },
+      { href: "/my-work", label: "My Work", icon: "◆" },
+      { href: "/playbooks", label: "Discover", icon: "▶" },
+      { href: "/sources", label: "Sources", icon: "🌐" },
     ],
   },
 ];

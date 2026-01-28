@@ -225,6 +225,130 @@ export const ALL_ACCESSIBLE_SOURCES = [
   ...FREEMIUM_SOURCES,
 ];
 
+/**
+ * MOST DEBIASED SOURCES
+ *
+ * These sources are ranked by anti-bias metrics, prioritizing:
+ * - Independence from commercial/political pressure
+ * - Transparency about methodology and funding
+ * - Perspective diversity and geographic neutrality
+ * - Resistance to selection bias
+ *
+ * Use these for maximum accuracy in identifying true systemic issues.
+ */
+export const MOST_DEBIASED_SOURCES: SourceConfig[] = [
+  // Tier 1: Highest debiased scores (0.75+)
+  {
+    name: "arXiv",
+    url: "https://arxiv.org/",
+    type: "research",
+    domains: ["technology", "ai", "computer-science", "economics", "physics"],
+    debiasedTier: 1,
+  },
+  {
+    name: "Our World in Data",
+    url: "https://ourworldindata.org/",
+    type: "research",
+    domains: ["health", "environment", "society", "economics", "technology"],
+    debiasedTier: 1,
+  },
+  {
+    name: "Gapminder",
+    url: "https://www.gapminder.org/data/",
+    type: "research",
+    domains: ["global", "development", "health", "economics"],
+    debiasedTier: 1,
+  },
+  {
+    name: "PubMed",
+    url: "https://pubmed.ncbi.nlm.nih.gov/",
+    type: "research",
+    domains: ["health", "medicine", "biology"],
+    debiasedTier: 1,
+  },
+  {
+    name: "Google Scholar",
+    url: "https://scholar.google.com/",
+    type: "research",
+    domains: ["all"],
+    debiasedTier: 1,
+  },
+
+  // Tier 2: High debiased scores (0.65-0.75)
+  {
+    name: "SSRN",
+    url: "https://www.ssrn.com/",
+    type: "research",
+    domains: ["economics", "law", "policy", "social-science"],
+    debiasedTier: 2,
+  },
+  {
+    name: "JSTOR",
+    url: "https://www.jstor.org/",
+    type: "research",
+    domains: ["humanities", "social-science", "history"],
+    debiasedTier: 2,
+  },
+  {
+    name: "Pew Research Center",
+    url: "https://www.pewresearch.org/",
+    type: "research",
+    domains: ["society", "demographics", "politics", "technology"],
+    debiasedTier: 2,
+  },
+  {
+    name: "Wikipedia",
+    url: "https://en.wikipedia.org/",
+    type: "research",
+    domains: ["all"],
+    debiasedTier: 2,
+  },
+  {
+    name: "AP News",
+    url: "https://apnews.com/",
+    type: "news",
+    domains: ["global", "politics", "society"],
+    debiasedTier: 2,
+  },
+
+  // Tier 3: Moderate debiased scores (0.55-0.65) - use with awareness
+  {
+    name: "Bureau of Labor Statistics",
+    url: "https://www.bls.gov/",
+    type: "research",
+    domains: ["economics", "labor", "employment"],
+    debiasedTier: 3,
+  },
+  {
+    name: "FRED Economic Data",
+    url: "https://fred.stlouisfed.org/",
+    type: "research",
+    domains: ["economics", "finance"],
+    debiasedTier: 3,
+  },
+  {
+    name: "World Bank Data",
+    url: "https://data.worldbank.org/",
+    type: "research",
+    domains: ["economics", "development", "global"],
+    debiasedTier: 3,
+  },
+  {
+    name: "Reuters",
+    url: "https://www.reuters.com/",
+    type: "news",
+    domains: ["global", "economics", "politics", "technology"],
+    debiasedTier: 3,
+  },
+];
+
+/**
+ * Get sources filtered by debiased tier
+ */
+export function getSourcesByDebiasedTier(maxTier: 1 | 2 | 3 = 2): SourceConfig[] {
+  return MOST_DEBIASED_SOURCES.filter(s => (s.debiasedTier ?? 3) <= maxTier);
+}
+
 // Sources to avoid or treat with heavy skepticism
 export const LOW_CREDIBILITY_PATTERNS = [
   // Engagement-optimized platforms

@@ -6,6 +6,7 @@ export interface SourceConfig {
   type: "research" | "news" | "report" | "observation";
   domains?: string[];
   selector?: string; // CSS selector for content extraction
+  debiasedTier?: 1 | 2 | 3; // 1 = highest debiased, 3 = moderate (use with awareness)
 }
 
 export interface FetchContext {

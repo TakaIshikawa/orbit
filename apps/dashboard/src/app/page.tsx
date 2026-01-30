@@ -24,6 +24,13 @@ export default function Home() {
     },
   });
 
+  const archiveMutation = useMutation({
+    mutationFn: (issueId: string) => api.archiveIssue(issueId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["dashboardSummary"] });
+    },
+  });
+
   const summary = dashboardData?.data;
 
   if (isLoading) {
@@ -84,6 +91,10 @@ export default function Home() {
                 onTakeAction={(solutionId) => {
                   assignMutation.mutate({ solutionId, userId: CURRENT_USER_ID });
                 }}
+                onArchive={() => {
+                  archiveMutation.mutate(issue.id);
+                }}
+                isArchiving={archiveMutation.isPending}
               />
             ))}
           </div>
@@ -149,9 +160,13 @@ export default function Home() {
 function ActionableIssueCard({
   issue,
   onTakeAction,
+  onArchive,
+  isArchiving,
 }: {
   issue: ActionableIssue;
   onTakeAction: (solutionId: string) => void;
+  onArchive: () => void;
+  isArchiving?: boolean;
 }) {
   const actionabilityPercent = Math.round(issue.actionability * 100);
 
@@ -194,12 +209,24 @@ function ActionableIssueCard({
           </div>
         </div>
 
-        <Link
-          href={`/issues/${issue.id}?tab=actions`}
-          className="px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 transition-colors whitespace-nowrap"
-        >
-          Take Action
-        </Link>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={onArchive}
+            disabled={isArchiving}
+            className="p-2 text-gray-400 hover:text-gray-200 hover:bg-gray-700 rounded-lg transition-colors disabled:opacity-50"
+            title="Archive issue"
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 8h14M5 8a2 2 0 110-4h14a2 2 0 110 4M5 8v10a2 2 0 002 2h10a2 2 0 002-2V8m-9 4h4" />
+            </svg>
+          </button>
+          <Link
+            href={`/issues/${issue.id}?tab=actions`}
+            className="px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 transition-colors whitespace-nowrap"
+          >
+            Take Action
+          </Link>
+        </div>
       </div>
     </div>
   );

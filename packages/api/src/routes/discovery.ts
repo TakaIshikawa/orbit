@@ -196,7 +196,7 @@ discoveryRoutes.post("/profiles/:id/run", async (c) => {
       },
     },
     currentStep: 0,
-    totalSteps: 3, // Scout -> Analyze -> Brief
+    totalSteps: 5, // Scout -> Analyze -> Issues -> Verify -> Solutions
     output: {},
     logs: [{ level: "info", message: "Discovery run queued", timestamp: new Date().toISOString() }],
   });

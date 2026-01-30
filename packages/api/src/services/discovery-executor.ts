@@ -5,8 +5,11 @@ import {
   ManagedSourceRepository,
   PatternRepository,
   IssueRepository,
+  SolutionRepository,
+  VerificationRepository,
   DiscoveryProfileRepository,
   type ManagedSourceRow,
+  type IssueRow,
 } from "@orbit/db";
 import { generateId, computeContentHash } from "@orbit/core";
 import { eventBus } from "../events/index.js";
@@ -61,6 +64,41 @@ interface DiscoveredIssue {
   patternIds: string[];
 }
 
+interface GeneratedVerification {
+  claimStatement: string;
+  claimCategory: "factual" | "statistical" | "causal" | "predictive" | "definitional";
+  originalConfidence: number;
+  status: "pending" | "corroborated" | "contested" | "partially_supported" | "unverified";
+  adjustedConfidence: number;
+  verificationNotes: string;
+  sourceAssessments: Array<{
+    url: string;
+    name: string;
+    credibility: number;
+    alignment: "supports" | "contradicts" | "neutral" | "partially_supports";
+    relevance: "high" | "medium" | "low" | "none";
+    relevantExcerpt: string;
+    confidence: number;
+  }>;
+}
+
+interface GeneratedSolution {
+  title: string;
+  summary: string;
+  solutionType: "tool" | "platform" | "system" | "automation" | "research" | "model" | "policy" | "other";
+  mechanism: string;
+  components: string[];
+  preconditions: string[];
+  risks: string[];
+  metrics: string[];
+  executionPlan: Array<{ step: number; action: string; owner?: string; timeline?: string }>;
+  targetLeveragePoints: string[];
+  successMetrics: Array<{ metric: string; target: string; timeline: string }>;
+  feasibilityScore: number;
+  impactScore: number;
+  confidence: number;
+}
+
 class DiscoveryExecutor {
   private anthropic: Anthropic;
   private isRunning = false;
@@ -107,6 +145,7 @@ class DiscoveryExecutor {
   private async processDiscoveryRun(executionId: string): Promise<void> {
     const db = getDatabase();
     const executionRepo = new PlaybookExecutionRepository(db);
+    const issueRepo = new IssueRepository(db);
 
     const execution = await executionRepo.findById(executionId);
     if (!execution) {
@@ -147,7 +186,7 @@ class DiscoveryExecutor {
       if (scoutResults.length === 0) {
         await executionRepo.updateStatus(executionId, "completed", {
           completedAt: new Date(),
-          output: { patternsCreated: [], issuesCreated: [], message: "No sources found matching criteria" },
+          output: { patternsCreated: [], issuesCreated: [], verificationsCreated: [], solutionsCreated: [], message: "No sources found matching criteria" },
         });
         await executionRepo.appendLog(executionId, "warn", "No sources found, completing early");
         return;
@@ -181,12 +220,43 @@ class DiscoveryExecutor {
       // Save issues to database
       const issueIds = await this.saveIssues(issues);
 
+      // Load the saved issues for verification and solution generation
+      const savedIssues: IssueRow[] = [];
+      for (const issueId of issueIds) {
+        const issue = await issueRepo.findById(issueId);
+        if (issue) savedIssues.push(issue);
+      }
+
+      // Step 4: Generate verifications for issues
+      await executionRepo.appendLog(executionId, "info", "Step 4: Verifying claims...", 3);
+      const verificationIds = await this.generateAndSaveVerifications(savedIssues, scoutResults);
+      await executionRepo.incrementStep(executionId);
+      await executionRepo.appendLog(
+        executionId,
+        "info",
+        `Created ${verificationIds.length} verifications`,
+        3
+      );
+
+      // Step 5: Generate solutions for issues
+      await executionRepo.appendLog(executionId, "info", "Step 5: Generating solutions...", 4);
+      const solutionIds = await this.generateAndSaveSolutions(savedIssues, context);
+      await executionRepo.incrementStep(executionId);
+      await executionRepo.appendLog(
+        executionId,
+        "info",
+        `Created ${solutionIds.length} solutions`,
+        4
+      );
+
       // Mark as completed
       await executionRepo.updateStatus(executionId, "completed", {
         completedAt: new Date(),
         output: {
           patternsCreated: patternIds,
           issuesCreated: issueIds,
+          verificationsCreated: verificationIds,
+          solutionsCreated: solutionIds,
           scoutedSources: scoutResults.length,
         },
       });
@@ -194,7 +264,7 @@ class DiscoveryExecutor {
       await executionRepo.appendLog(
         executionId,
         "info",
-        `Discovery completed: ${patternIds.length} patterns, ${issueIds.length} issues`
+        `Discovery completed: ${patternIds.length} patterns, ${issueIds.length} issues, ${verificationIds.length} verifications, ${solutionIds.length} solutions`
       );
 
       // Publish completion event
@@ -591,6 +661,293 @@ Respond in JSON format:
     }
 
     return savedIds;
+  }
+
+  private async generateAndSaveVerifications(
+    issues: IssueRow[],
+    scoutResults: ScoutResult[]
+  ): Promise<string[]> {
+    const db = getDatabase();
+    const verificationRepo = new VerificationRepository(db);
+    const savedIds: string[] = [];
+
+    for (const issue of issues) {
+      try {
+        const verifications = await this.generateVerifications(issue, scoutResults);
+
+        for (const verification of verifications) {
+          const id = generateId("ver");
+
+          await verificationRepo.create({
+            id,
+            createdAt: new Date(),
+            sourceType: "issue",
+            sourceId: issue.id,
+            claimStatement: verification.claimStatement,
+            claimCategory: verification.claimCategory,
+            originalConfidence: verification.originalConfidence,
+            status: verification.status,
+            adjustedConfidence: verification.adjustedConfidence,
+            verificationNotes: verification.verificationNotes,
+            corroboratingSourcesCount: verification.sourceAssessments.filter(
+              (s) => s.alignment === "supports"
+            ).length,
+            conflictingSourcesCount: verification.sourceAssessments.filter(
+              (s) => s.alignment === "contradicts"
+            ).length,
+            sourceAssessments: verification.sourceAssessments,
+            conflicts: [],
+          });
+
+          savedIds.push(id);
+        }
+      } catch (error) {
+        console.error(`Failed to generate verifications for issue ${issue.id}:`, error);
+      }
+    }
+
+    return savedIds;
+  }
+
+  private async generateVerifications(
+    issue: IssueRow,
+    scoutResults: ScoutResult[]
+  ): Promise<GeneratedVerification[]> {
+    const sourceSummary = scoutResults
+      .map((r) => `- ${r.sourceName} (${r.sourceUrl}): credibility ${(r.credibility * 100).toFixed(0)}%`)
+      .join("\n");
+
+    const prompt = `You are a fact-checker verifying key claims in an identified issue.
+
+ISSUE:
+Title: ${issue.title}
+Summary: ${issue.summary}
+Key Number: ${issue.keyNumber || "Not specified"}
+Root Causes: ${issue.rootCauses.join(", ")}
+
+AVAILABLE SOURCES:
+${sourceSummary}
+
+Extract 2-3 key verifiable claims from this issue and assess them. For each claim:
+
+1. State the claim clearly
+2. Categorize it (factual, statistical, causal, predictive, or definitional)
+3. Assess confidence based on available sources
+4. Determine verification status
+5. Provide notes on the verification
+
+Respond in JSON format:
+{
+  "verifications": [
+    {
+      "claimStatement": "The specific claim being verified",
+      "claimCategory": "statistical",
+      "originalConfidence": 0.7,
+      "status": "partially_supported",
+      "adjustedConfidence": 0.6,
+      "verificationNotes": "Explanation of the verification result",
+      "sourceAssessments": [
+        {
+          "url": "https://example.com",
+          "name": "Source Name",
+          "credibility": 0.8,
+          "alignment": "supports",
+          "relevance": "high",
+          "relevantExcerpt": "Quote from source",
+          "confidence": 0.8
+        }
+      ]
+    }
+  ]
+}
+
+Status options: pending, corroborated, contested, partially_supported, unverified
+Alignment options: supports, contradicts, neutral, partially_supports
+Relevance options: high, medium, low, none`;
+
+    try {
+      const response = await this.anthropic.messages.create({
+        model: "claude-sonnet-4-20250514",
+        max_tokens: 4096,
+        messages: [{ role: "user", content: prompt }],
+      });
+
+      const textContent = response.content.find((c) => c.type === "text");
+      if (!textContent || textContent.type !== "text") {
+        return [];
+      }
+
+      const jsonMatch = textContent.text.match(/\{[\s\S]*\}/);
+      if (!jsonMatch) {
+        console.error("No JSON found in verification response");
+        return [];
+      }
+
+      const parsed = JSON.parse(jsonMatch[0]);
+      return parsed.verifications as GeneratedVerification[];
+    } catch (error) {
+      console.error("Verification generation failed:", error);
+      return [];
+    }
+  }
+
+  private async generateAndSaveSolutions(
+    issues: IssueRow[],
+    context: DiscoveryContext
+  ): Promise<string[]> {
+    const db = getDatabase();
+    const solutionRepo = new SolutionRepository(db);
+    const savedIds: string[] = [];
+
+    for (const issue of issues) {
+      try {
+        const solutions = await this.generateSolutions(issue);
+
+        for (const solution of solutions) {
+          const id = generateId("sol");
+          const now = new Date();
+
+          const payload = {
+            type: "Solution" as const,
+            title: solution.title,
+            summary: solution.summary,
+          };
+          const contentHash = await computeContentHash(payload);
+
+          await solutionRepo.create({
+            id,
+            contentHash,
+            parentHash: null,
+            author: "discovery_executor",
+            authorSignature: `sig:discovery_${Date.now()}`,
+            createdAt: now,
+            version: 1,
+            status: "active",
+            situationModelId: null,
+            issueId: issue.id,
+            title: solution.title,
+            summary: solution.summary,
+            solutionType: solution.solutionType,
+            mechanism: solution.mechanism,
+            components: solution.components,
+            preconditions: solution.preconditions,
+            risks: solution.risks,
+            metrics: solution.metrics,
+            executionPlan: solution.executionPlan,
+            artifacts: [],
+            addressesIssues: [issue.id],
+            targetLeveragePoints: solution.targetLeveragePoints,
+            successMetrics: solution.successMetrics,
+            estimatedImpact: { score: solution.impactScore, description: "AI-estimated impact" },
+            feasibilityScore: solution.feasibilityScore,
+            impactScore: solution.impactScore,
+            confidence: solution.confidence,
+            solutionStatus: "proposed",
+            assignedTo: null,
+            assignedAt: null,
+          });
+
+          savedIds.push(id);
+
+          // Publish solution created event
+          eventBus.publish("solution.created", { solutionId: id });
+        }
+      } catch (error) {
+        console.error(`Failed to generate solutions for issue ${issue.id}:`, error);
+      }
+    }
+
+    return savedIds;
+  }
+
+  private async generateSolutions(issue: IssueRow): Promise<GeneratedSolution[]> {
+    const prompt = `You are a strategic analyst proposing actionable solutions for an identified issue.
+
+ISSUE:
+Title: ${issue.title}
+Summary: ${issue.summary}
+Headline: ${issue.headline || "Not specified"}
+Why Now: ${issue.whyNow || "Not specified"}
+Key Number: ${issue.keyNumber || "Not specified"}
+Root Causes: ${issue.rootCauses.join(", ")}
+Affected Domains: ${issue.affectedDomains.join(", ")}
+Leverage Points: ${issue.leveragePoints.join(", ")}
+Time Horizon: ${issue.timeHorizon}
+Scores: Impact=${issue.scoreImpact}, Urgency=${issue.scoreUrgency}, Tractability=${issue.scoreTractability}
+
+Generate 1-2 concrete, actionable solutions. For each solution:
+
+1. Clear title and summary
+2. Solution type (tool, platform, system, automation, research, model, policy, other)
+3. Mechanism - how it works
+4. Components needed
+5. Preconditions required
+6. Risks to consider
+7. Metrics to track
+8. Step-by-step execution plan
+9. Target leverage points
+10. Success metrics with targets and timelines
+11. Feasibility score (0-1)
+12. Impact score (0-1)
+13. Confidence in this solution (0-1)
+
+Respond in JSON format:
+{
+  "solutions": [
+    {
+      "title": "Solution title",
+      "summary": "Comprehensive summary of the solution",
+      "solutionType": "policy",
+      "mechanism": "How this solution addresses the issue",
+      "components": ["component1", "component2"],
+      "preconditions": ["condition1", "condition2"],
+      "risks": ["risk1", "risk2"],
+      "metrics": ["metric1", "metric2"],
+      "executionPlan": [
+        {"step": 1, "action": "First action", "timeline": "Week 1-2"},
+        {"step": 2, "action": "Second action", "timeline": "Week 3-4"}
+      ],
+      "targetLeveragePoints": ["leverage1"],
+      "successMetrics": [
+        {"metric": "Adoption rate", "target": "50%", "timeline": "6 months"}
+      ],
+      "feasibilityScore": 0.7,
+      "impactScore": 0.8,
+      "confidence": 0.75
+    }
+  ]
+}
+
+Focus on solutions that are:
+- Concrete and actionable (not vague recommendations)
+- Feasible given the tractability score
+- Targeted at identified leverage points
+- Measurable with clear success criteria`;
+
+    try {
+      const response = await this.anthropic.messages.create({
+        model: "claude-sonnet-4-20250514",
+        max_tokens: 4096,
+        messages: [{ role: "user", content: prompt }],
+      });
+
+      const textContent = response.content.find((c) => c.type === "text");
+      if (!textContent || textContent.type !== "text") {
+        return [];
+      }
+
+      const jsonMatch = textContent.text.match(/\{[\s\S]*\}/);
+      if (!jsonMatch) {
+        console.error("No JSON found in solution response");
+        return [];
+      }
+
+      const parsed = JSON.parse(jsonMatch[0]);
+      return parsed.solutions as GeneratedSolution[];
+    } catch (error) {
+      console.error("Solution generation failed:", error);
+      return [];
+    }
   }
 }
 

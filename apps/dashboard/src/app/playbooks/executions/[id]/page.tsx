@@ -13,6 +13,13 @@ interface ArtifactSummary {
   verifications: number;
 }
 
+interface SourceUsed {
+  id: string;
+  name: string;
+  url: string;
+  credibility: number;
+}
+
 export default function ExecutionDetailPage() {
   const params = useParams();
   const id = params.id as string;
@@ -151,6 +158,54 @@ export default function ExecutionDetailPage() {
                 </Link>
               </div>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* Sources Used */}
+      {execution.output?.sourcesUsed && (execution.output.sourcesUsed as SourceUsed[]).length > 0 && (
+        <div className="border border-gray-800 rounded-lg p-6">
+          <h2 className="text-lg font-semibold mb-4">Sources Used</h2>
+          <div className="space-y-3">
+            {(execution.output.sourcesUsed as SourceUsed[]).map((source) => (
+              <div
+                key={source.id}
+                className="flex items-center justify-between p-3 bg-gray-800/50 rounded-lg"
+              >
+                <div className="flex-1 min-w-0">
+                  <a
+                    href={source.url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="font-medium text-blue-400 hover:text-blue-300 transition-colors"
+                  >
+                    {source.name}
+                  </a>
+                  <p className="text-sm text-gray-500 truncate">{source.url}</p>
+                </div>
+                <div className="flex items-center gap-2 ml-4">
+                  <div className="text-right">
+                    <div className={`text-sm font-medium ${
+                      source.credibility >= 0.8 ? "text-green-400" :
+                      source.credibility >= 0.6 ? "text-yellow-400" :
+                      "text-orange-400"
+                    }`}>
+                      {Math.round(source.credibility * 100)}%
+                    </div>
+                    <div className="text-xs text-gray-500">credibility</div>
+                  </div>
+                  <Link
+                    href={`/sources/${source.id}`}
+                    className="p-2 text-gray-400 hover:text-gray-200 hover:bg-gray-700 rounded transition-colors"
+                    title="View source details"
+                  >
+                    <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+                    </svg>
+                  </Link>
+                </div>
+              </div>
+            ))}
           </div>
         </div>
       )}

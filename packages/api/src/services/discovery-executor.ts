@@ -183,10 +183,18 @@ class DiscoveryExecutor {
         0
       );
 
+      // Store scouted sources info for display
+      const scoutedSourcesInfo = scoutResults.map((r) => ({
+        id: r.sourceId,
+        name: r.sourceName,
+        url: r.sourceUrl,
+        credibility: r.credibility,
+      }));
+
       if (scoutResults.length === 0) {
         await executionRepo.updateStatus(executionId, "completed", {
           completedAt: new Date(),
-          output: { patternsCreated: [], issuesCreated: [], verificationsCreated: [], solutionsCreated: [], message: "No sources found matching criteria" },
+          output: { patternsCreated: [], issuesCreated: [], verificationsCreated: [], solutionsCreated: [], sourcesUsed: [], message: "No sources found matching criteria" },
         });
         await executionRepo.appendLog(executionId, "warn", "No sources found, completing early");
         return;
@@ -257,7 +265,7 @@ class DiscoveryExecutor {
           issuesCreated: issueIds,
           verificationsCreated: verificationIds,
           solutionsCreated: solutionIds,
-          scoutedSources: scoutResults.length,
+          sourcesUsed: scoutedSourcesInfo,
         },
       });
 

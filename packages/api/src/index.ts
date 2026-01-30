@@ -27,7 +27,9 @@ import { feedbackRoutes } from "./routes/feedback.js";
 import { sourcesRoutes } from "./routes/sources.js";
 import { pipelineRoutes } from "./routes/pipeline.js";
 import { dashboardRoutes } from "./routes/dashboard.js";
+import { discoveryRoutes } from "./routes/discovery.js";
 import { setupWebSocket } from "./events/index.js";
+import { startDiscoveryExecutor } from "./services/discovery-executor.js";
 
 const app = new Hono();
 
@@ -53,6 +55,7 @@ app.route("/feedback", feedbackRoutes);
 app.route("/sources", sourcesRoutes);
 app.route("/pipeline", pipelineRoutes);
 app.route("/dashboard", dashboardRoutes);
+app.route("/discovery", discoveryRoutes);
 
 // 404 handler
 app.notFound((c) => {
@@ -87,5 +90,8 @@ const server = serve({
 // @hono/node-server returns a Node.js http.Server instance
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 setupWebSocket(server as any).catch(console.error);
+
+// Start the discovery executor to process discovery runs
+startDiscoveryExecutor();
 
 export { app };

@@ -1,19 +1,35 @@
 "use client";
 
 import React, { useState, useMemo } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
 import { api, type Issue } from "@/lib/api";
 
 type SortOption = "actionability" | "urgency" | "neglectedness" | "composite";
 
 export default function IssuesPage() {
+  const queryClient = useQueryClient();
   const [selectedDomain, setSelectedDomain] = useState<string>("all");
   const [sortBy, setSortBy] = useState<SortOption>("actionability");
+  const [includeArchived, setIncludeArchived] = useState(false);
 
   const { data, isLoading, error } = useQuery({
-    queryKey: ["issues"],
-    queryFn: () => api.getIssues({ limit: 100 }),
+    queryKey: ["issues", { includeArchived }],
+    queryFn: () => api.getIssues({ limit: 100, includeArchived }),
+  });
+
+  const archiveMutation = useMutation({
+    mutationFn: ({ id, reason }: { id: string; reason?: string }) => api.archiveIssue(id, reason),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["issues"] });
+    },
+  });
+
+  const unarchiveMutation = useMutation({
+    mutationFn: (id: string) => api.unarchiveIssue(id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["issues"] });
+    },
   });
 
   // Fetch solutions to determine which issues have solutions and their feasibility
@@ -179,6 +195,17 @@ export default function IssuesPage() {
             ))}
           </div>
         </div>
+
+        {/* Archive Toggle */}
+        <label className="flex items-center gap-2 cursor-pointer">
+          <input
+            type="checkbox"
+            checked={includeArchived}
+            onChange={(e) => setIncludeArchived(e.target.checked)}
+            className="w-4 h-4 rounded border-gray-700 bg-gray-800 text-blue-600 focus:ring-blue-500"
+          />
+          <span className="text-sm text-gray-400">Show archived</span>
+        </label>
       </div>
 
       {isLoading && (
@@ -215,7 +242,13 @@ export default function IssuesPage() {
           </div>
           <div className="space-y-4">
             {processedIssues.map((issue) => (
-              <IssueCard key={issue.id} issue={issue} />
+              <IssueCard
+                key={issue.id}
+                issue={issue}
+                onArchive={(id) => archiveMutation.mutate({ id })}
+                onUnarchive={(id) => unarchiveMutation.mutate(id)}
+                isArchiving={archiveMutation.isPending}
+              />
             ))}
           </div>
         </>
@@ -233,7 +266,17 @@ interface ProcessedIssue extends Issue {
   totalClaims: number;
 }
 
-function IssueCard({ issue }: { issue: ProcessedIssue }) {
+function IssueCard({
+  issue,
+  onArchive,
+  onUnarchive,
+  isArchiving,
+}: {
+  issue: ProcessedIssue;
+  onArchive: (id: string) => void;
+  onUnarchive: (id: string) => void;
+  isArchiving: boolean;
+}) {
   // Determine simple status for display
   const simpleStatus = issue.simpleStatus || (
     issue.solutionCount > 0 && issue.hasFeasibleSolution ? "being_worked" :
@@ -254,14 +297,31 @@ function IssueCard({ issue }: { issue: ProcessedIssue }) {
   const priorityColor = issue.compositeScore >= 0.7 ? "border-l-red-500" :
     issue.compositeScore >= 0.4 ? "border-l-yellow-500" : "border-l-green-500";
 
+  const handleArchiveClick = (e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (issue.isArchived) {
+      onUnarchive(issue.id);
+    } else {
+      onArchive(issue.id);
+    }
+  };
+
   return (
     <Link
       href={`/issues/${issue.id}`}
-      className={`block border border-gray-800 border-l-4 ${priorityColor} rounded-lg p-4 hover:border-gray-700 hover:bg-gray-900/30 transition-colors`}
+      className={`block border border-gray-800 border-l-4 ${priorityColor} rounded-lg p-4 hover:border-gray-700 hover:bg-gray-900/30 transition-colors ${
+        issue.isArchived ? "opacity-60" : ""
+      }`}
     >
       {/* Top Row: Status + Key Number + Priority */}
       <div className="flex items-center justify-between mb-3">
         <div className="flex items-center gap-3">
+          {issue.isArchived && (
+            <span className="text-xs px-2 py-1 rounded border bg-gray-800 text-gray-400 border-gray-700">
+              Archived
+            </span>
+          )}
           <span className={`text-xs px-2 py-1 rounded border ${status.color}`}>
             {status.label}
           </span>
@@ -271,11 +331,29 @@ function IssueCard({ issue }: { issue: ProcessedIssue }) {
             </span>
           )}
         </div>
-        <div className={`text-xl font-bold ${
-          issue.compositeScore >= 0.7 ? "text-red-400" :
-          issue.compositeScore >= 0.4 ? "text-yellow-400" : "text-green-400"
-        }`}>
-          {(issue.compositeScore * 100).toFixed(0)}
+        <div className="flex items-center gap-3">
+          <button
+            onClick={handleArchiveClick}
+            disabled={isArchiving}
+            className="p-1.5 text-gray-500 hover:text-white hover:bg-gray-700 rounded transition-colors disabled:opacity-50"
+            title={issue.isArchived ? "Unarchive" : "Archive"}
+          >
+            {issue.isArchived ? (
+              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 8h14M5 8a2 2 0 110-4h14a2 2 0 110 4M5 8v10a2 2 0 002 2h10a2 2 0 002-2V8m-9 4h4" />
+              </svg>
+            ) : (
+              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 8h14M5 8a2 2 0 110-4h14a2 2 0 110 4M5 8v10a2 2 0 002 2h10a2 2 0 002-2V8m-9 4l3 3m0 0l3-3m-3 3V9" />
+              </svg>
+            )}
+          </button>
+          <div className={`text-xl font-bold ${
+            issue.compositeScore >= 0.7 ? "text-red-400" :
+            issue.compositeScore >= 0.4 ? "text-yellow-400" : "text-green-400"
+          }`}>
+            {(issue.compositeScore * 100).toFixed(0)}
+          </div>
         </div>
       </div>
 

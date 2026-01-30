@@ -19,10 +19,11 @@ const listQuerySchema = z.object({
   search: z.string().optional(),
   sortBy: z.enum(["compositeScore", "createdAt", "urgency", "impact"]).optional().default("compositeScore"),
   order: z.enum(["asc", "desc"]).optional().default("desc"),
+  includeArchived: z.coerce.boolean().optional().default(false),
 });
 
 issuesRoutes.get("/", zValidator("query", listQuerySchema), async (c) => {
-  const { limit, offset, issueStatus, timeHorizon, minScore, maxScore, search, sortBy, order } =
+  const { limit, offset, issueStatus, timeHorizon, minScore, maxScore, search, sortBy, order, includeArchived } =
     c.req.valid("query");
 
   const db = getDatabase();
@@ -35,6 +36,7 @@ issuesRoutes.get("/", zValidator("query", listQuerySchema), async (c) => {
       minCompositeScore: minScore,
       maxCompositeScore: maxScore,
       search,
+      includeArchived,
     },
     { limit, offset, sortBy, order }
   );
@@ -314,4 +316,66 @@ issuesRoutes.post("/summarize-all", async (c) => {
       results,
     },
   });
+});
+
+// Archive an issue
+const archiveSchema = z.object({
+  reason: z.string().optional(),
+});
+
+issuesRoutes.post("/:id/archive", zValidator("json", archiveSchema), async (c) => {
+  const id = c.req.param("id");
+  const { reason } = c.req.valid("json");
+
+  const db = getDatabase();
+  const repo = new IssueRepository(db);
+
+  const existing = await repo.findById(id);
+  if (!existing) {
+    return c.json({ error: { code: "NOT_FOUND", message: "Issue not found" } }, 404);
+  }
+
+  if (existing.isArchived) {
+    return c.json({ error: { code: "ALREADY_ARCHIVED", message: "Issue is already archived" } }, 400);
+  }
+
+  // TODO: Get archivedBy from auth context
+  const archivedBy = "actor_system";
+
+  const archived = await repo.archive(id, reason, archivedBy);
+
+  if (!archived) {
+    return c.json({ error: { code: "ARCHIVE_FAILED", message: "Failed to archive issue" } }, 500);
+  }
+
+  eventBus.publish("issue.archived", { issue: archived });
+
+  return c.json({ data: archived });
+});
+
+// Unarchive an issue
+issuesRoutes.post("/:id/unarchive", async (c) => {
+  const id = c.req.param("id");
+
+  const db = getDatabase();
+  const repo = new IssueRepository(db);
+
+  const existing = await repo.findById(id);
+  if (!existing) {
+    return c.json({ error: { code: "NOT_FOUND", message: "Issue not found" } }, 404);
+  }
+
+  if (!existing.isArchived) {
+    return c.json({ error: { code: "NOT_ARCHIVED", message: "Issue is not archived" } }, 400);
+  }
+
+  const unarchived = await repo.unarchive(id);
+
+  if (!unarchived) {
+    return c.json({ error: { code: "UNARCHIVE_FAILED", message: "Failed to unarchive issue" } }, 500);
+  }
+
+  eventBus.publish("issue.unarchived", { issue: unarchived });
+
+  return c.json({ data: unarchived });
 });

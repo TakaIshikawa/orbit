@@ -72,6 +72,11 @@ export interface Issue {
   timeHorizon: string;
   propagationVelocity: string;
   issueStatus: string;
+  // Archive fields
+  isArchived: boolean;
+  archivedAt?: string | null;
+  archivedBy?: string | null;
+  archiveReason?: string | null;
 }
 
 // Solution types
@@ -662,12 +667,14 @@ class ApiClient {
     offset?: number;
     status?: string;
     minScore?: number;
+    includeArchived?: boolean;
   }): Promise<PaginatedResponse<Issue>> {
     const searchParams = new URLSearchParams();
     if (params?.limit) searchParams.set("limit", params.limit.toString());
     if (params?.offset) searchParams.set("offset", params.offset.toString());
     if (params?.status) searchParams.set("status", params.status);
     if (params?.minScore) searchParams.set("minScore", params.minScore.toString());
+    if (params?.includeArchived) searchParams.set("includeArchived", "true");
 
     const query = searchParams.toString();
     return this.request(`/issues${query ? `?${query}` : ""}`);
@@ -708,6 +715,19 @@ class ApiClient {
     };
   }> {
     return this.request("/issues/summarize-all", {
+      method: "POST",
+    });
+  }
+
+  async archiveIssue(id: string, reason?: string): Promise<SingleResponse<Issue>> {
+    return this.request(`/issues/${id}/archive`, {
+      method: "POST",
+      body: JSON.stringify({ reason }),
+    });
+  }
+
+  async unarchiveIssue(id: string): Promise<SingleResponse<Issue>> {
+    return this.request(`/issues/${id}/unarchive`, {
       method: "POST",
     });
   }
@@ -1303,6 +1323,79 @@ class ApiClient {
   async stopPipelineRun(runId: string): Promise<{ data: { runId: string; status: string; message: string } }> {
     return this.request(`/pipeline/runs/${runId}/stop`, { method: "POST" });
   }
+
+  // Discovery Profiles
+  async getDiscoveryProfiles(params?: {
+    limit?: number;
+    offset?: number;
+    isScheduled?: boolean;
+    isDefault?: boolean;
+    search?: string;
+  }): Promise<PaginatedResponse<DiscoveryProfile>> {
+    const searchParams = new URLSearchParams();
+    if (params?.limit) searchParams.set("limit", params.limit.toString());
+    if (params?.offset) searchParams.set("offset", params.offset.toString());
+    if (params?.isScheduled !== undefined) searchParams.set("isScheduled", params.isScheduled.toString());
+    if (params?.isDefault !== undefined) searchParams.set("isDefault", params.isDefault.toString());
+    if (params?.search) searchParams.set("search", params.search);
+
+    const query = searchParams.toString();
+    return this.request(`/discovery/profiles${query ? `?${query}` : ""}`);
+  }
+
+  async getDiscoveryProfile(id: string): Promise<SingleResponse<DiscoveryProfile>> {
+    return this.request(`/discovery/profiles/${id}`);
+  }
+
+  async getDefaultDiscoveryProfile(): Promise<SingleResponse<DiscoveryProfile>> {
+    return this.request("/discovery/profiles/default");
+  }
+
+  async createDiscoveryProfile(data: CreateDiscoveryProfileInput): Promise<SingleResponse<DiscoveryProfile>> {
+    return this.request("/discovery/profiles", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async updateDiscoveryProfile(id: string, data: UpdateDiscoveryProfileInput): Promise<SingleResponse<DiscoveryProfile>> {
+    return this.request(`/discovery/profiles/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async deleteDiscoveryProfile(id: string): Promise<{ data: { deleted: boolean; id: string } }> {
+    return this.request(`/discovery/profiles/${id}`, { method: "DELETE" });
+  }
+
+  async runDiscoveryProfile(id: string): Promise<SingleResponse<{ executionId: string; profileId: string; status: string; message: string }>> {
+    return this.request(`/discovery/profiles/${id}/run`, { method: "POST" });
+  }
+
+  async scheduleDiscoveryProfile(id: string, cronExpression: string, nextRunAt?: string): Promise<SingleResponse<DiscoveryProfile>> {
+    return this.request(`/discovery/profiles/${id}/schedule`, {
+      method: "POST",
+      body: JSON.stringify({ cronExpression, nextRunAt }),
+    });
+  }
+
+  async unscheduleDiscoveryProfile(id: string): Promise<SingleResponse<DiscoveryProfile>> {
+    return this.request(`/discovery/profiles/${id}/schedule`, { method: "DELETE" });
+  }
+
+  async setDefaultDiscoveryProfile(id: string): Promise<SingleResponse<DiscoveryProfile>> {
+    return this.request(`/discovery/profiles/${id}/set-default`, { method: "POST" });
+  }
+
+  async getDiscoveryRuns(params?: { limit?: number; offset?: number }): Promise<PaginatedResponse<DiscoveryRun>> {
+    const searchParams = new URLSearchParams();
+    if (params?.limit) searchParams.set("limit", params.limit.toString());
+    if (params?.offset) searchParams.set("offset", params.offset.toString());
+
+    const query = searchParams.toString();
+    return this.request(`/discovery/runs${query ? `?${query}` : ""}`);
+  }
 }
 
 // Outcome types
@@ -1371,4 +1464,342 @@ export interface PipelineRunOutput {
   lineCount: number;
 }
 
+// Managed Source types
+export interface ManagedSource {
+  id: string;
+  domain: string;
+  name: string;
+  url: string;
+  description: string | null;
+  status: "active" | "paused" | "removed";
+  sourceType: "research" | "news" | "government" | "ngo" | "think_tank" | "industry" | "aggregator" | "preprint" | "other";
+  incentiveType: "academic" | "nonprofit" | "commercial" | "government" | "advocacy" | "wire_service" | "aggregator" | "platform" | "independent";
+  domains: string[];
+  overallCredibility: number;
+  factualAccuracy: number;
+  methodologicalRigor: number;
+  transparencyScore: number;
+  independenceScore: number;
+  ideologicalTransparency: number;
+  fundingTransparency: number;
+  conflictDisclosure: number;
+  perspectiveDiversity: number;
+  geographicNeutrality: number;
+  temporalNeutrality: number;
+  selectionBiasResistance: number;
+  quantificationBias: number;
+  debiasedScore: number;
+  notes: string | null;
+  tags: string[];
+  customMetadata: Record<string, unknown> | null;
+  createdAt: string;
+  updatedAt: string;
+  pausedAt: string | null;
+  removedAt: string | null;
+  lastAssessedAt: string | null;
+  assessedBy: string | null;
+  assessmentVersion: number;
+  autoSyncHealth: boolean;
+}
+
+export interface ManagedSourceAssessment {
+  factualAccuracy?: number;
+  methodologicalRigor?: number;
+  transparencyScore?: number;
+  independenceScore?: number;
+  ideologicalTransparency?: number;
+  fundingTransparency?: number;
+  conflictDisclosure?: number;
+  perspectiveDiversity?: number;
+  geographicNeutrality?: number;
+  temporalNeutrality?: number;
+  selectionBiasResistance?: number;
+  quantificationBias?: number;
+}
+
+export interface SourceAssessmentHistory {
+  id: string;
+  sourceId: string;
+  assessmentSnapshot: {
+    overallCredibility: number;
+    factualAccuracy: number;
+    methodologicalRigor: number;
+    transparencyScore: number;
+    independenceScore: number;
+    ideologicalTransparency: number;
+    fundingTransparency: number;
+    conflictDisclosure: number;
+    perspectiveDiversity: number;
+    geographicNeutrality: number;
+    temporalNeutrality: number;
+    selectionBiasResistance: number;
+    quantificationBias: number;
+    debiasedScore: number;
+  };
+  changedFields: string[];
+  changeReason: string | null;
+  assessedBy: string | null;
+  recordedAt: string;
+}
+
+export interface ManagedSourceStats {
+  byStatus: {
+    active: number;
+    paused: number;
+    removed: number;
+  };
+  byDebiasedTier: {
+    tier1: number;
+    tier2: number;
+    tier3: number;
+    below: number;
+  };
+  total: number;
+}
+
+export interface CreateManagedSourceInput {
+  domain: string;
+  name: string;
+  url: string;
+  description?: string;
+  sourceType?: ManagedSource["sourceType"];
+  incentiveType?: ManagedSource["incentiveType"];
+  domains?: string[];
+  tags?: string[];
+  notes?: string;
+  assessment?: ManagedSourceAssessment;
+  assessedBy?: string;
+}
+
+// Discovery Profile types
+export interface DiscoveryProfile {
+  id: string;
+  name: string;
+  description: string | null;
+  sourceIds: string[];
+  domains: string[];
+  keywords: string[];
+  excludeKeywords: string[];
+  maxPatterns: number;
+  maxIssues: number;
+  minSourceCredibility: number | null;
+  isScheduled: boolean;
+  cronExpression: string | null;
+  lastRunAt: string | null;
+  nextRunAt: string | null;
+  isDefault: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CreateDiscoveryProfileInput {
+  name: string;
+  description?: string;
+  sourceIds?: string[];
+  domains?: string[];
+  keywords?: string[];
+  excludeKeywords?: string[];
+  maxPatterns?: number;
+  maxIssues?: number;
+  minSourceCredibility?: number;
+  isDefault?: boolean;
+}
+
+export interface UpdateDiscoveryProfileInput {
+  name?: string;
+  description?: string;
+  sourceIds?: string[];
+  domains?: string[];
+  keywords?: string[];
+  excludeKeywords?: string[];
+  maxPatterns?: number;
+  maxIssues?: number;
+  minSourceCredibility?: number;
+  isDefault?: boolean;
+}
+
+export interface DiscoveryRun {
+  id: string;
+  playbookId: string;
+  triggeredBy: string;
+  triggerRef: string | null;
+  status: "pending" | "running" | "paused" | "completed" | "failed" | "cancelled";
+  startedAt: string;
+  completedAt: string | null;
+  context: {
+    patternId?: string;
+    issueId?: string;
+    briefId?: string;
+    variables?: Record<string, unknown>;
+  };
+  currentStep: number;
+  totalSteps: number;
+  output: Record<string, unknown>;
+  error: string | null;
+  logs: Array<{
+    timestamp: string;
+    level: "info" | "warn" | "error";
+    message: string;
+    stepIndex?: number;
+  }>;
+}
+
 export const api = new ApiClient();
+
+// Add managed source methods to ApiClient
+Object.assign(ApiClient.prototype, {
+  // Managed Sources
+  async getManagedSourceStats(this: ApiClient): Promise<SingleResponse<ManagedSourceStats>> {
+    return (this as unknown as { request: ApiClient["request"] }).request("/sources/managed/stats");
+  },
+
+  async getManagedSources(this: ApiClient, params?: {
+    limit?: number;
+    offset?: number;
+    status?: "active" | "paused" | "removed";
+    sourceType?: string;
+    incentiveType?: string;
+    minCredibility?: number;
+    minDebiasedScore?: number;
+    domain?: string;
+    search?: string;
+  }): Promise<PaginatedResponse<ManagedSource>> {
+    const searchParams = new URLSearchParams();
+    if (params?.limit) searchParams.set("limit", params.limit.toString());
+    if (params?.offset) searchParams.set("offset", params.offset.toString());
+    if (params?.status) searchParams.set("status", params.status);
+    if (params?.sourceType) searchParams.set("sourceType", params.sourceType);
+    if (params?.incentiveType) searchParams.set("incentiveType", params.incentiveType);
+    if (params?.minCredibility) searchParams.set("minCredibility", params.minCredibility.toString());
+    if (params?.minDebiasedScore) searchParams.set("minDebiasedScore", params.minDebiasedScore.toString());
+    if (params?.domain) searchParams.set("domain", params.domain);
+    if (params?.search) searchParams.set("search", params.search);
+
+    const query = searchParams.toString();
+    return (this as unknown as { request: ApiClient["request"] }).request(`/sources/managed${query ? `?${query}` : ""}`);
+  },
+
+  async getManagedSourcesByTier(this: ApiClient, tier: 1 | 2 | 3, params?: {
+    limit?: number;
+    offset?: number;
+  }): Promise<PaginatedResponse<ManagedSource>> {
+    const searchParams = new URLSearchParams();
+    searchParams.set("tier", tier.toString());
+    if (params?.limit) searchParams.set("limit", params.limit.toString());
+    if (params?.offset) searchParams.set("offset", params.offset.toString());
+
+    return (this as unknown as { request: ApiClient["request"] }).request(`/sources/managed/by-tier?${searchParams.toString()}`);
+  },
+
+  async getManagedSource(this: ApiClient, id: string): Promise<SingleResponse<ManagedSource>> {
+    return (this as unknown as { request: ApiClient["request"] }).request(`/sources/managed/${id}`);
+  },
+
+  async getManagedSourceByDomain(this: ApiClient, domain: string): Promise<SingleResponse<ManagedSource>> {
+    return (this as unknown as { request: ApiClient["request"] }).request(`/sources/managed/by-domain/${encodeURIComponent(domain)}`);
+  },
+
+  async createManagedSource(this: ApiClient, data: CreateManagedSourceInput): Promise<SingleResponse<ManagedSource>> {
+    return (this as unknown as { request: ApiClient["request"] }).request("/sources/managed", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  },
+
+  async updateManagedSourceAssessment(this: ApiClient, id: string, assessment: ManagedSourceAssessment & {
+    assessedBy?: string;
+    changeReason?: string;
+  }): Promise<SingleResponse<ManagedSource>> {
+    return (this as unknown as { request: ApiClient["request"] }).request(`/sources/managed/${id}/assessment`, {
+      method: "PATCH",
+      body: JSON.stringify(assessment),
+    });
+  },
+
+  async updateManagedSource(this: ApiClient, id: string, data: {
+    name?: string;
+    description?: string;
+    sourceType?: ManagedSource["sourceType"];
+    incentiveType?: ManagedSource["incentiveType"];
+    domains?: string[];
+    tags?: string[];
+    notes?: string;
+  }): Promise<SingleResponse<ManagedSource>> {
+    return (this as unknown as { request: ApiClient["request"] }).request(`/sources/managed/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify(data),
+    });
+  },
+
+  async pauseManagedSource(this: ApiClient, id: string): Promise<SingleResponse<ManagedSource>> {
+    return (this as unknown as { request: ApiClient["request"] }).request(`/sources/managed/${id}/pause`, {
+      method: "POST",
+    });
+  },
+
+  async resumeManagedSource(this: ApiClient, id: string): Promise<SingleResponse<ManagedSource>> {
+    return (this as unknown as { request: ApiClient["request"] }).request(`/sources/managed/${id}/resume`, {
+      method: "POST",
+    });
+  },
+
+  async removeManagedSource(this: ApiClient, id: string): Promise<SingleResponse<ManagedSource>> {
+    return (this as unknown as { request: ApiClient["request"] }).request(`/sources/managed/${id}/remove`, {
+      method: "POST",
+    });
+  },
+
+  async restoreManagedSource(this: ApiClient, id: string): Promise<SingleResponse<ManagedSource>> {
+    return (this as unknown as { request: ApiClient["request"] }).request(`/sources/managed/${id}/restore`, {
+      method: "POST",
+    });
+  },
+
+  async deleteManagedSource(this: ApiClient, id: string): Promise<{ data: { deleted: boolean; id: string } }> {
+    return (this as unknown as { request: ApiClient["request"] }).request(`/sources/managed/${id}`, {
+      method: "DELETE",
+    });
+  },
+
+  async getManagedSourceHistory(this: ApiClient, id: string, params?: {
+    limit?: number;
+    offset?: number;
+  }): Promise<PaginatedResponse<SourceAssessmentHistory>> {
+    const searchParams = new URLSearchParams();
+    if (params?.limit) searchParams.set("limit", params.limit.toString());
+    if (params?.offset) searchParams.set("offset", params.offset.toString());
+
+    const query = searchParams.toString();
+    return (this as unknown as { request: ApiClient["request"] }).request(`/sources/managed/${id}/history${query ? `?${query}` : ""}`);
+  },
+});
+
+// Type augmentation for ApiClient
+declare module "@/lib/api" {
+  interface ApiClient {
+    getManagedSourceStats(): Promise<SingleResponse<ManagedSourceStats>>;
+    getManagedSources(params?: {
+      limit?: number;
+      offset?: number;
+      status?: "active" | "paused" | "removed";
+      sourceType?: string;
+      incentiveType?: string;
+      minCredibility?: number;
+      minDebiasedScore?: number;
+      domain?: string;
+      search?: string;
+    }): Promise<PaginatedResponse<ManagedSource>>;
+    getManagedSourcesByTier(tier: 1 | 2 | 3, params?: { limit?: number; offset?: number }): Promise<PaginatedResponse<ManagedSource>>;
+    getManagedSource(id: string): Promise<SingleResponse<ManagedSource>>;
+    getManagedSourceByDomain(domain: string): Promise<SingleResponse<ManagedSource>>;
+    createManagedSource(data: CreateManagedSourceInput): Promise<SingleResponse<ManagedSource>>;
+    updateManagedSourceAssessment(id: string, assessment: ManagedSourceAssessment & { assessedBy?: string; changeReason?: string }): Promise<SingleResponse<ManagedSource>>;
+    updateManagedSource(id: string, data: { name?: string; description?: string; sourceType?: ManagedSource["sourceType"]; incentiveType?: ManagedSource["incentiveType"]; domains?: string[]; tags?: string[]; notes?: string }): Promise<SingleResponse<ManagedSource>>;
+    pauseManagedSource(id: string): Promise<SingleResponse<ManagedSource>>;
+    resumeManagedSource(id: string): Promise<SingleResponse<ManagedSource>>;
+    removeManagedSource(id: string): Promise<SingleResponse<ManagedSource>>;
+    restoreManagedSource(id: string): Promise<SingleResponse<ManagedSource>>;
+    deleteManagedSource(id: string): Promise<{ data: { deleted: boolean; id: string } }>;
+    getManagedSourceHistory(id: string, params?: { limit?: number; offset?: number }): Promise<PaginatedResponse<SourceAssessmentHistory>>;
+  }
+}

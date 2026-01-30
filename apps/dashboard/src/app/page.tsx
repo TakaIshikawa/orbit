@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api, ActionableIssue, ActiveWorkSolution, SolutionWithEffectiveness } from "@/lib/api";
+import { QuickDiscovery } from "@/components/discovery";
 
 // Placeholder user ID - in production this would come from auth
 const CURRENT_USER_ID = "user_default";
@@ -54,6 +55,13 @@ export default function Home() {
           Your action-oriented workspace for systematic change
         </p>
       </div>
+
+      {/* Quick Discovery */}
+      <QuickDiscovery
+        onRunComplete={() => {
+          queryClient.invalidateQueries({ queryKey: ["dashboardSummary"] });
+        }}
+      />
 
       {/* Needs Attention */}
       <section className="border border-gray-800 rounded-lg p-6">

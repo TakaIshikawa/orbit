@@ -14,3 +14,5 @@ export * from "./computer-use-sessions.js";
 export * from "./solution-outcomes.js";
 export * from "./source-health.js";
 export * from "./feedback.js";
+export * from "./managed-sources.js";
+export * from "./discovery-profiles.js";

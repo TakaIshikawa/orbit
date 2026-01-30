@@ -10,6 +10,7 @@ export interface IssueFilters {
   minCompositeScore?: number;
   maxCompositeScore?: number;
   search?: string;
+  includeArchived?: boolean; // Default false - excludes archived issues
 }
 
 export interface IssueSortOptions extends ListOptions {
@@ -27,6 +28,11 @@ export class IssueRepository extends BaseRepository<typeof issues, IssueRow, New
   ): Promise<PaginatedResult<IssueRow>> {
     const { limit = 20, offset = 0, sortBy = "compositeScore", order = "desc" } = options;
     const conditions: SQL[] = [];
+
+    // Exclude archived issues by default
+    if (!filters.includeArchived) {
+      conditions.push(eq(issues.isArchived, false));
+    }
 
     if (filters.issueStatus) {
       conditions.push(eq(issues.issueStatus, filters.issueStatus as typeof issues.issueStatus.enumValues[number]));
@@ -104,5 +110,33 @@ export class IssueRepository extends BaseRepository<typeof issues, IssueRow, New
     ]);
 
     return { upstream, downstream, related };
+  }
+
+  async archive(id: string, reason?: string, archivedBy?: string): Promise<IssueRow | null> {
+    const results = await this.db
+      .update(issues)
+      .set({
+        isArchived: true,
+        archivedAt: new Date(),
+        archivedBy: archivedBy,
+        archiveReason: reason,
+      })
+      .where(eq(issues.id, id))
+      .returning();
+    return results[0] ?? null;
+  }
+
+  async unarchive(id: string): Promise<IssueRow | null> {
+    const results = await this.db
+      .update(issues)
+      .set({
+        isArchived: false,
+        archivedAt: null,
+        archivedBy: null,
+        archiveReason: null,
+      })
+      .where(eq(issues.id, id))
+      .returning();
+    return results[0] ?? null;
   }
 }

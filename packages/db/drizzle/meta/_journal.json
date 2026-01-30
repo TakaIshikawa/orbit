@@ -15,6 +15,20 @@
       "when": 1769173765768,
       "tag": "0001_feedback_and_monitoring",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1769587398197,
+      "tag": "0002_smart_timeslip",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1769602831592,
+      "tag": "0003_dazzling_sandman",
+      "breakpoints": true
     }
   ]
 }

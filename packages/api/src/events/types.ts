@@ -7,6 +7,8 @@ export const EventTypeSchema = z.enum([
   "issue.created",
   "issue.updated",
   "issue.deleted",
+  "issue.archived",
+  "issue.unarchived",
   "solution.created",
   "solution.updated",
   "solution.deleted",
@@ -18,6 +20,12 @@ export const EventTypeSchema = z.enum([
   "playbook.updated",
   "playbook.deleted",
   "feedback.created",
+  "discovery.profile.created",
+  "discovery.profile.updated",
+  "discovery.profile.deleted",
+  "discovery.profile.scheduled",
+  "discovery.profile.unscheduled",
+  "discovery.run.started",
 ]);
 
 export type EventType = z.infer<typeof EventTypeSchema>;

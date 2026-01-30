@@ -95,6 +95,22 @@ export default function IssueDetailPage() {
     },
   });
 
+  const archiveMutation = useMutation({
+    mutationFn: (reason?: string) => api.archiveIssue(id, reason),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["issue", id] });
+      queryClient.invalidateQueries({ queryKey: ["issues"] });
+    },
+  });
+
+  const unarchiveMutation = useMutation({
+    mutationFn: () => api.unarchiveIssue(id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["issue", id] });
+      queryClient.invalidateQueries({ queryKey: ["issues"] });
+    },
+  });
+
   if (isLoading) {
     return (
       <div className="flex items-center justify-center py-12">
@@ -155,6 +171,35 @@ export default function IssueDetailPage() {
 
   return (
     <div className="space-y-6 max-w-5xl">
+      {/* Archive Banner */}
+      {issue.isArchived && (
+        <div className="flex items-center justify-between bg-gray-800/50 border border-gray-700 rounded-lg p-3">
+          <div className="flex items-center gap-3">
+            <svg className="w-5 h-5 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 8h14M5 8a2 2 0 110-4h14a2 2 0 110 4M5 8v10a2 2 0 002 2h10a2 2 0 002-2V8m-9 4h4" />
+            </svg>
+            <div>
+              <span className="text-gray-300">This issue is archived</span>
+              {issue.archiveReason && (
+                <span className="text-gray-500 ml-2">- {issue.archiveReason}</span>
+              )}
+              {issue.archivedAt && (
+                <span className="text-xs text-gray-500 ml-2">
+                  ({new Date(issue.archivedAt).toLocaleDateString()})
+                </span>
+              )}
+            </div>
+          </div>
+          <button
+            onClick={() => unarchiveMutation.mutate()}
+            disabled={unarchiveMutation.isPending}
+            className="px-3 py-1.5 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 transition-colors"
+          >
+            {unarchiveMutation.isPending ? "..." : "Unarchive"}
+          </button>
+        </div>
+      )}
+
       {/* Breadcrumb */}
       <div className="flex items-center justify-between text-sm">
         <div className="flex items-center gap-2 text-gray-500">
@@ -162,15 +207,27 @@ export default function IssueDetailPage() {
           <span>/</span>
           <span className="text-gray-300">{issue.id}</span>
         </div>
-        {!hasCondensedSummary && (
-          <button
-            onClick={() => summarizeMutation.mutate()}
-            disabled={summarizeMutation.isPending}
-            className="text-xs px-3 py-1 bg-gray-800 text-gray-400 rounded hover:bg-gray-700 hover:text-white transition-colors disabled:opacity-50"
-          >
-            {summarizeMutation.isPending ? "Generating..." : "Generate Summary"}
-          </button>
-        )}
+        <div className="flex items-center gap-2">
+          {!issue.isArchived && (
+            <button
+              onClick={() => archiveMutation.mutate(undefined)}
+              disabled={archiveMutation.isPending}
+              className="text-xs px-3 py-1 bg-gray-800 text-gray-400 rounded hover:bg-gray-700 hover:text-white transition-colors disabled:opacity-50"
+              title="Archive this issue"
+            >
+              {archiveMutation.isPending ? "..." : "Archive"}
+            </button>
+          )}
+          {!hasCondensedSummary && (
+            <button
+              onClick={() => summarizeMutation.mutate()}
+              disabled={summarizeMutation.isPending}
+              className="text-xs px-3 py-1 bg-gray-800 text-gray-400 rounded hover:bg-gray-700 hover:text-white transition-colors disabled:opacity-50"
+            >
+              {summarizeMutation.isPending ? "Generating..." : "Generate Summary"}
+            </button>
+          )}
+        </div>
       </div>
 
       {/* Layer 1: Glanceable Header */}
@@ -356,6 +413,11 @@ interface IssueDetail {
   author: string;
   createdAt: string;
   contentHash: string;
+  // Archive fields
+  isArchived: boolean;
+  archivedAt?: string | null;
+  archivedBy?: string | null;
+  archiveReason?: string | null;
 }
 
 interface Brief {

@@ -14,6 +14,8 @@ export * from "./playbook-executions.js";
 export * from "./solution-outcomes.js";
 export * from "./source-health.js";
 export * from "./feedback.js";
+export * from "./managed-sources.js";
+export * from "./discovery-profiles.js";
 
 // Re-export types for convenience
 export type { PatternRow, NewPatternRow } from "../schema/patterns.js";
@@ -32,3 +34,5 @@ export type { PlaybookStep, PlaybookTrigger, PlaybookStepAction } from "../schem
 export type { SolutionOutcomeRow, NewSolutionOutcomeRow, SolutionEffectivenessRow, NewSolutionEffectivenessRow } from "../schema/solution-outcomes.js";
 export type { SourceFetchLogRow, NewSourceFetchLogRow, SourceHealthRow, NewSourceHealthRow, SourceReliabilityHistoryRow, NewSourceReliabilityHistoryRow } from "../schema/source-health.js";
 export type { FeedbackEventRow, NewFeedbackEventRow, ConfidenceAdjustmentRow, NewConfidenceAdjustmentRow, SystemLearningRow, NewSystemLearningRow, EvaluationRunRow, NewEvaluationRunRow } from "../schema/feedback.js";
+export type { ManagedSourceRow, NewManagedSourceRow, SourceAssessmentHistoryRow, NewSourceAssessmentHistoryRow, SourceAssessmentInput } from "../schema/managed-sources.js";
+export type { DiscoveryProfileRow, NewDiscoveryProfileRow } from "../schema/discovery-profiles.js";

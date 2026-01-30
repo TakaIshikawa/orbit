@@ -1,4 +1,4 @@
-import { jsonb, pgEnum, pgTable, text, timestamp, integer, real } from "drizzle-orm/pg-core";
+import { boolean, jsonb, pgEnum, pgTable, text, timestamp, integer, real } from "drizzle-orm/pg-core";
 import { recordStatusEnum } from "./patterns.js";
 
 export const timeHorizonEnum = pgEnum("time_horizon", ["months", "years", "decades"]);
@@ -68,6 +68,12 @@ export const issues = pgTable("issues", {
 
   // State
   issueStatus: issueStatusEnum("issue_status").notNull().default("identified"),
+
+  // Archive fields
+  isArchived: boolean("is_archived").notNull().default(false),
+  archivedAt: timestamp("archived_at", { withTimezone: true }),
+  archivedBy: text("archived_by"),
+  archiveReason: text("archive_reason"),
 });
 
 export type IssueRow = typeof issues.$inferSelect;

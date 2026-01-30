@@ -29,7 +29,7 @@ import { pipelineRoutes } from "./routes/pipeline.js";
 import { dashboardRoutes } from "./routes/dashboard.js";
 import { discoveryRoutes } from "./routes/discovery.js";
 import { setupWebSocket } from "./events/index.js";
-import { startDiscoveryExecutor } from "./services/discovery-executor.js";
+import { startEnhancedDiscoveryExecutor } from "./services/enhanced-discovery-executor.js";
 
 const app = new Hono();
 
@@ -91,7 +91,7 @@ const server = serve({
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 setupWebSocket(server as any).catch(console.error);
 
-// Start the discovery executor to process discovery runs
-startDiscoveryExecutor();
+// Start the enhanced discovery executor to process discovery runs
+startEnhancedDiscoveryExecutor();
 
 export { app };

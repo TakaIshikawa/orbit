@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useMemo } from "react";
+import Link from "next/link";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api, DiscoveryProfile, ManagedSource } from "@/lib/api";
 import { SourceSelector } from "./SourceSelector";
@@ -33,11 +34,11 @@ export function QuickDiscovery({ onRunComplete }: QuickDiscoveryProps) {
     queryFn: () => (api as typeof api & { getManagedSources: (params?: { status?: string }) => Promise<{ data: ManagedSource[] }> }).getManagedSources({ status: "active" }),
   });
 
-  // Fetch recent discovery runs
+  // Fetch recent discovery runs (limit 10, with running/pending prioritized)
   const { data: runsData, isLoading: runsLoading } = useQuery({
     queryKey: ["discoveryRuns"],
-    queryFn: () => api.getDiscoveryRuns({ limit: 5 }),
-    refetchInterval: 10000, // Refresh every 10 seconds
+    queryFn: () => api.getDiscoveryRuns({ limit: 10 }),
+    refetchInterval: 5000, // Refresh every 5 seconds for better real-time updates
   });
 
   // Create profile mutation
@@ -247,7 +248,17 @@ export function QuickDiscovery({ onRunComplete }: QuickDiscoveryProps) {
       {/* Recent runs */}
       {(runs.length > 0 || runsLoading) && (
         <div>
-          <h3 className="text-sm font-medium text-gray-400 mb-2">Recent Discoveries</h3>
+          <div className="flex items-center justify-between mb-2">
+            <h3 className="text-sm font-medium text-gray-400">Recent Discoveries</h3>
+            {runsData?.meta && runsData.meta.total > 10 && (
+              <Link
+                href="/playbooks/executions"
+                className="text-xs text-blue-400 hover:text-blue-300"
+              >
+                View all ({runsData.meta.total})
+              </Link>
+            )}
+          </div>
           <DiscoveryRunList runs={runs} isLoading={runsLoading} />
         </div>
       )}

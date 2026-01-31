@@ -63,15 +63,15 @@ discoveryRoutes.get("/profiles", zValidator("query", listQuerySchema), async (c)
   });
 });
 
-// Get recent discovery runs (playbook executions with scout action)
+// Get recent discovery runs (playbook executions with discovery playbook)
 discoveryRoutes.get("/runs", zValidator("query", runsQuerySchema), async (c) => {
   const { limit, offset } = c.req.valid("query");
 
   const db = getDatabase();
   const executionRepo = new PlaybookExecutionRepository(db);
 
-  // Get recent executions - in a real implementation, we'd filter by discovery-related playbooks
-  const result = await executionRepo.findMany({ limit, offset });
+  // Get discovery runs with running/pending prioritized, then by date
+  const result = await executionRepo.findDiscoveryRunsWithPriority({ limit, offset });
 
   return c.json({
     data: result.data,

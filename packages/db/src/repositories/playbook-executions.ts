@@ -1,4 +1,4 @@
-import { eq, desc, and } from "drizzle-orm";
+import { eq, desc, and, sql } from "drizzle-orm";
 import {
   playbookExecutions,
   playbookStepExecutions,
@@ -48,6 +48,45 @@ export class PlaybookExecutionRepository extends BaseRepository<
       .select()
       .from(playbookExecutions)
       .where(eq(playbookExecutions.status, "running"));
+  }
+
+  /**
+   * Find discovery runs with running/pending prioritized, then by date
+   */
+  async findDiscoveryRunsWithPriority(options: ListOptions = {}): Promise<PaginatedResult<PlaybookExecutionRow>> {
+    const { limit = 20, offset = 0 } = options;
+
+    // Count total discovery runs
+    const countResult = await this.db
+      .select({ count: sql<number>`count(*)` })
+      .from(playbookExecutions)
+      .where(eq(playbookExecutions.playbookId, "discovery"));
+
+    const total = Number(countResult[0]?.count ?? 0);
+
+    // Get discovery runs with custom ordering using SQL CASE:
+    // 1. Running/pending first (status priority)
+    // 2. Then by startedAt descending
+    const statusPriority = sql<number>`CASE ${playbookExecutions.status}
+      WHEN 'running' THEN 1
+      WHEN 'pending' THEN 2
+      ELSE 3
+    END`;
+
+    const data = await this.db
+      .select()
+      .from(playbookExecutions)
+      .where(eq(playbookExecutions.playbookId, "discovery"))
+      .orderBy(statusPriority, desc(playbookExecutions.startedAt))
+      .limit(limit)
+      .offset(offset);
+
+    return {
+      data,
+      total,
+      limit,
+      offset,
+    };
   }
 
   async updateStatus(

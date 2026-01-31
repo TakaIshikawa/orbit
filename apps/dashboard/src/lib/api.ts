@@ -1,4 +1,5 @@
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:3000";
+// Default port matches .env PORT setting; use NEXT_PUBLIC_API_URL for custom config
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:4921";
 
 export interface PaginatedResponse<T> {
   data: T[];

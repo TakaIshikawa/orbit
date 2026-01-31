@@ -9,6 +9,7 @@
   ],
   "scripts": {
     "dev": "turbo dev",
+    "dev:random": "node scripts/dev-random-ports.mjs",
     "dev:api": "npm run --workspace=@orbit/api dev",
     "build": "turbo build",
     "test": "turbo test",

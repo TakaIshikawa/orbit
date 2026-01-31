@@ -34,7 +34,8 @@ interface UseWebSocketOptions {
   maxReconnectAttempts?: number;
 }
 
-const WS_URL = process.env.NEXT_PUBLIC_WS_URL || "ws://localhost:3001/ws";
+// WebSocket connects to the API server; default port matches .env PORT setting
+const WS_URL = process.env.NEXT_PUBLIC_WS_URL || "ws://localhost:4921/ws";
 
 // Map event types to query keys for auto-invalidation
 const eventToQueryKey: Record<string, string[]> = {

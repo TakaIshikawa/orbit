@@ -2,10 +2,18 @@ import dotenv from "dotenv";
 import path from "path";
 import { fileURLToPath } from "url";
 
+// Preserve PORT from command line before dotenv loads
+const CLI_PORT = process.env.PORT;
+
 // Load .env from project root
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const envPath = path.resolve(__dirname, "../../../.env");
 dotenv.config({ path: envPath });
+
+// Restore CLI PORT if it was set (takes precedence over .env)
+if (CLI_PORT) {
+  process.env.PORT = CLI_PORT;
+}
 import { serve } from "@hono/node-server";
 import { Hono } from "hono";
 import { cors } from "hono/cors";

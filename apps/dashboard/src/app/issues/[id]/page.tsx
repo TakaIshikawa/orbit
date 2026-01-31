@@ -1057,7 +1057,7 @@ function OutcomeSolutionCard({
     queryKey: ["solution-effectiveness", solution.id],
     queryFn: async () => {
       try {
-        const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL || "http://localhost:3000"}/solutions/${solution.id}/effectiveness`);
+        const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL || "http://localhost:4921"}/solutions/${solution.id}/effectiveness`);
         if (!res.ok) return null;
         return res.json();
       } catch {

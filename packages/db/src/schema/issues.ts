@@ -38,6 +38,17 @@ export const issues = pgTable("issues", {
   summary: text("summary").notNull(),
   patternIds: jsonb("pattern_ids").$type<string[]>().notNull().default([]),
 
+  // Sources used to generate this issue (with item-level references)
+  sources: jsonb("sources").$type<Array<{
+    sourceId: string;
+    sourceName: string;
+    sourceUrl: string;
+    itemTitle: string;
+    itemUrl: string;
+    excerpt?: string;
+    credibility?: number;
+  }>>().notNull().default([]),
+
   // Condensed display (human-readable summaries for UI)
   headline: text("headline"),                           // One sentence, specific, no jargon
   whyNow: text("why_now"),                              // Time-sensitivity explanation
@@ -74,6 +85,25 @@ export const issues = pgTable("issues", {
   archivedAt: timestamp("archived_at", { withTimezone: true }),
   archivedBy: text("archived_by"),
   archiveReason: text("archive_reason"),
+
+  // Bayesian Expected Value scoring
+  // Links to the reference class that provides base rate priors
+  referenceClassId: text("reference_class_id"),
+
+  // Bayesian scores stored as JSONB for flexibility
+  bayesianScores: jsonb("bayesian_scores").$type<{
+    pReal: { alpha: number; beta: number; mean: number };
+    pSolvable: { alpha: number; beta: number; mean: number };
+    impact: { estimate: number; confidence: number };
+    reach: { estimate: number; confidence: number; unit?: string };
+    cost: { estimate: number; confidence: number; unit?: string };
+    lastUpdatedAt: string;
+  }>(),
+
+  // Computed Expected Value: P(real) × P(solvable) × Impact × Reach - Cost
+  expectedValue: real("expected_value"),
+  // Confidence in EV estimate (increases with more observations)
+  evConfidence: real("ev_confidence"),
 });
 
 export type IssueRow = typeof issues.$inferSelect;

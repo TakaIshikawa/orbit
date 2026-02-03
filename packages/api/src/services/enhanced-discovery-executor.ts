@@ -19,13 +19,17 @@ import {
   IssueRepository,
   SolutionRepository,
   VerificationRepository,
+  FeedbackEventRepository,
+  SystemLearningRepository,
   type ManagedSourceRow,
   type IssueRow,
   type PatternRow,
+  type VerificationRow,
 } from "@orbit/db";
 import { generateId, computeContentHash } from "@orbit/core";
 import { eventBus } from "../events/index.js";
 import { SourceFetcherRegistry, type FetchedContent, type FetchedItem } from "./source-fetchers/index.js";
+import { getBayesianScoringService } from "./bayesian-scoring.js";
 
 // ============================================================================
 // Types
@@ -47,6 +51,10 @@ interface ExtractedClaim {
   statement: string;
   sourceId: string;
   sourceName: string;
+  sourceUrl: string;
+  // Item-level references (specific article/paper)
+  itemTitle: string;
+  itemUrl: string;
   excerpt: string;
   category: "factual" | "statistical" | "causal" | "predictive";
   confidence: number;
@@ -65,7 +73,14 @@ interface DiscoveredPattern {
   patternType: "policy_gap" | "structural_inefficiency" | "feedback_loop" | "information_asymmetry" | "coordination_failure" | "other";
   domains: string[];
   confidence: number;
-  sources: Array<{ sourceId: string; excerpt: string }>;
+  sources: Array<{
+    sourceId: string;
+    sourceName: string;
+    sourceUrl: string;
+    itemTitle: string;
+    itemUrl: string;
+    excerpt: string;
+  }>;
   claimSupport: number; // Number of claims supporting this pattern
   crossValidationScore: number;
 }
@@ -249,7 +264,7 @@ export class EnhancedDiscoveryExecutor {
       await executionRepo.incrementStep(executionId);
       await executionRepo.appendLog(executionId, "info", `Created ${issues.length} issues`, 2);
 
-      const issueIds = await this.saveIssues(issues);
+      const issueIds = await this.saveIssues(issues, patterns, sourcesUsed);
 
       // Load saved issues
       const savedIssues: IssueRow[] = [];
@@ -270,9 +285,13 @@ export class EnhancedDiscoveryExecutor {
       await executionRepo.incrementStep(executionId);
       await executionRepo.appendLog(executionId, "info", `Created ${solutionIds.length} solutions`, 4);
 
+      const completedAt = new Date();
+      const startedAt = execution.startedAt || new Date();
+      const durationMs = completedAt.getTime() - startedAt.getTime();
+
       // Complete
       await executionRepo.updateStatus(executionId, "completed", {
-        completedAt: new Date(),
+        completedAt,
         output: {
           sourcesUsed,
           patternsCreated: patternIds,
@@ -289,14 +308,57 @@ export class EnhancedDiscoveryExecutor {
         `Discovery completed: ${patternIds.length} patterns, ${issueIds.length} issues, ${verificationIds.length} verifications, ${solutionIds.length} solutions`
       );
 
+      // Generate feedback events to close the loop for system improvement
+      await this.generateFeedbackEvents({
+        executionId,
+        playbookId: execution.playbookId,
+        success: true,
+        durationMs,
+        totalSteps: 5,
+        stepsCompleted: 5,
+        sourcesUsed,
+        patternIds,
+        verificationIds,
+        context,
+      });
+
+      await executionRepo.appendLog(
+        executionId,
+        "info",
+        "Feedback events generated for system improvement"
+      );
+
       eventBus.publish("run.completed", { executionId, type: "discovery" });
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
+      const failedAt = new Date();
+      const startedAt = execution.startedAt || new Date();
+      const durationMs = failedAt.getTime() - startedAt.getTime();
+
       await executionRepo.updateStatus(executionId, "failed", {
         error: errorMessage,
-        completedAt: new Date(),
+        completedAt: failedAt,
       });
       await executionRepo.appendLog(executionId, "error", `Discovery failed: ${errorMessage}`);
+
+      // Generate failure feedback for learning
+      try {
+        await this.generateFeedbackEvents({
+          executionId,
+          playbookId: execution.playbookId,
+          success: false,
+          durationMs,
+          totalSteps: 5,
+          stepsCompleted: 0, // Unknown, assume 0
+          sourcesUsed: [],
+          patternIds: [],
+          verificationIds: [],
+          context,
+        });
+      } catch (feedbackError) {
+        console.error("[Feedback] Failed to generate failure feedback:", feedbackError);
+      }
+
       throw error;
     }
   }
@@ -391,9 +453,12 @@ export class EnhancedDiscoveryExecutor {
     const allClaims: ExtractedClaim[] = [];
 
     for (const content of fetchedContent) {
-      const sourceText = content.items
-        .slice(0, 10)
-        .map((item) => `[${item.title}]\n${item.summary || item.content.slice(0, 500)}`)
+      // Build item map for reference lookup
+      const items = content.items.slice(0, 10);
+      const itemMap = new Map(items.map((item, idx) => [idx, item]));
+
+      const sourceText = items
+        .map((item, idx) => `[ITEM_${idx}] "${item.title}" (${item.url})\n${item.summary || item.content.slice(0, 500)}`)
         .join("\n\n---\n\n");
 
       const prompt = `Extract key factual claims from this source content. Focus on claims that are:
@@ -411,6 +476,7 @@ For each claim, provide:
 2. Category: factual, statistical, causal, or predictive
 3. A relevant excerpt from the source
 4. Confidence level (0-1)
+5. The ITEM_N identifier that this claim comes from (e.g., "ITEM_0")
 
 Respond in JSON:
 {
@@ -419,7 +485,8 @@ Respond in JSON:
       "statement": "Clear claim statement",
       "category": "statistical",
       "excerpt": "Quote from source",
-      "confidence": 0.8
+      "confidence": 0.8,
+      "itemRef": "ITEM_0"
     }
   ]
 }
@@ -439,10 +506,18 @@ Extract up to 10 key claims.`;
           if (jsonMatch) {
             const parsed = JSON.parse(jsonMatch[0]);
             for (const claim of parsed.claims || []) {
+              // Extract item index from itemRef (e.g., "ITEM_0" -> 0)
+              const itemRefMatch = claim.itemRef?.match(/ITEM_(\d+)/);
+              const itemIdx = itemRefMatch ? parseInt(itemRefMatch[1], 10) : 0;
+              const item = itemMap.get(itemIdx) || items[0];
+
               allClaims.push({
                 statement: claim.statement,
                 sourceId: content.sourceId,
                 sourceName: content.sourceName,
+                sourceUrl: content.sourceUrl,
+                itemTitle: item?.title || content.sourceName,
+                itemUrl: item?.url || content.sourceUrl,
                 excerpt: claim.excerpt,
                 category: claim.category,
                 confidence: claim.confidence,
@@ -620,12 +695,14 @@ Identify up to ${context.maxPatterns} patterns.`;
       if (text && text.type === "text") {
         const jsonMatch = text.text.match(/\{[\s\S]*\}/);
         if (jsonMatch) {
-          const parsed = JSON.parse(jsonMatch[0]);
-          return (parsed.patterns || []).map((p: DiscoveredPattern & { supportingClaims?: string[] }) => ({
-            ...p,
-            claimSupport: p.supportingClaims?.length || 0,
-            crossValidationScore: 0,
-          }));
+          const parsed = this.safeJsonParse(jsonMatch[0]);
+          if (parsed) {
+            return (parsed.patterns || []).map((p: DiscoveredPattern & { supportingClaims?: string[] }) => ({
+              ...p,
+              claimSupport: p.supportingClaims?.length || 0,
+              crossValidationScore: 0,
+            }));
+          }
         }
       }
     } catch (error) {
@@ -633,6 +710,58 @@ Identify up to ${context.maxPatterns} patterns.`;
     }
 
     return [];
+  }
+
+  /**
+   * Safely parse JSON with automatic repair for common LLM output issues
+   */
+  private safeJsonParse(jsonStr: string): { patterns?: DiscoveredPattern[] } | null {
+    // Try direct parse first
+    try {
+      return JSON.parse(jsonStr);
+    } catch {
+      // Continue to repair attempts
+    }
+
+    // Attempt repairs for common issues
+    let repaired = jsonStr;
+
+    try {
+      // Fix 1: Remove trailing commas before } or ]
+      repaired = repaired.replace(/,(\s*[}\]])/g, "$1");
+
+      // Fix 2: Fix unescaped quotes in strings (common LLM issue)
+      // This is a simplified fix - replace obvious cases
+      repaired = repaired.replace(/:\s*"([^"]*)"([^",}\]]*)"([^"]*?)"/g, ': "$1\'$2\'$3"');
+
+      // Fix 3: Truncated JSON - try to close unclosed brackets
+      const openBraces = (repaired.match(/{/g) || []).length;
+      const closeBraces = (repaired.match(/}/g) || []).length;
+      const openBrackets = (repaired.match(/\[/g) || []).length;
+      const closeBrackets = (repaired.match(/\]/g) || []).length;
+
+      // If truncated, try to close the structure
+      if (openBraces > closeBraces || openBrackets > closeBrackets) {
+        // Remove potentially incomplete last element
+        repaired = repaired.replace(/,\s*"[^"]*$/, "");
+        repaired = repaired.replace(/,\s*\{[^}]*$/, "");
+
+        // Close remaining brackets/braces
+        for (let i = 0; i < openBrackets - closeBrackets; i++) {
+          repaired += "]";
+        }
+        for (let i = 0; i < openBraces - closeBraces; i++) {
+          repaired += "}";
+        }
+      }
+
+      const result = JSON.parse(repaired);
+      console.log("[CoT] JSON repaired successfully");
+      return result;
+    } catch (e) {
+      console.error("[CoT] JSON repair failed:", e);
+      return null;
+    }
   }
 
   private async critiqueAndRefinePatterns(
@@ -736,8 +865,24 @@ Respond in JSON:
         (supportingClaims.length * 0.1) + (sourceTypes.size * 0.2)
       );
 
+      // Build enriched sources from supporting claims with item-level details
+      const enrichedSources = supportingClaims.map((claim) => ({
+        sourceId: claim.sourceId,
+        sourceName: claim.sourceName,
+        sourceUrl: claim.sourceUrl,
+        itemTitle: claim.itemTitle,
+        itemUrl: claim.itemUrl,
+        excerpt: claim.excerpt,
+      }));
+
+      // Deduplicate sources by itemUrl
+      const uniqueSources = Array.from(
+        new Map(enrichedSources.map((s) => [s.itemUrl, s])).values()
+      );
+
       return {
         ...pattern,
+        sources: uniqueSources.length > 0 ? uniqueSources : pattern.sources,
         claimSupport: supportingClaims.length,
         crossValidationScore,
         confidence: Math.min(1, pattern.confidence + crossValidationScore * 0.2),
@@ -921,12 +1066,62 @@ Respond in JSON:
     return [];
   }
 
-  private async saveIssues(issues: DiscoveredIssue[]): Promise<string[]> {
+  private async saveIssues(
+    issues: DiscoveredIssue[],
+    patterns: DiscoveredPattern[],
+    sourcesUsed: Array<{ id: string; name: string; url: string; credibility: number; itemCount: number }>
+  ): Promise<string[]> {
     const db = getDatabase();
     const issueRepo = new IssueRepository(db);
     const savedIds: string[] = [];
 
+    // Build credibility lookup from sourcesUsed
+    const credibilityMap = new Map(sourcesUsed.map((s) => [s.id, s.credibility]));
+
+    // Collect ALL sources from ALL patterns (since issues are synthesized from all patterns)
+    const allPatternSources: Array<{
+      sourceId: string;
+      sourceName: string;
+      sourceUrl: string;
+      itemTitle: string;
+      itemUrl: string;
+      excerpt?: string;
+      credibility?: number;
+    }> = [];
+
+    for (const pattern of patterns) {
+      if (pattern.sources) {
+        for (const src of pattern.sources) {
+          allPatternSources.push({
+            sourceId: src.sourceId,
+            sourceName: src.sourceName,
+            sourceUrl: src.sourceUrl,
+            itemTitle: src.itemTitle,
+            itemUrl: src.itemUrl,
+            excerpt: src.excerpt,
+            credibility: credibilityMap.get(src.sourceId),
+          });
+        }
+      }
+    }
+
+    // Deduplicate by itemUrl
+    const uniqueSources = Array.from(
+      new Map(allPatternSources.map((s) => [s.itemUrl, s])).values()
+    );
+
+    // Fallback to source-level info if no item-level sources
+    const finalSources = uniqueSources.length > 0 ? uniqueSources : sourcesUsed.map((s) => ({
+      sourceId: s.id,
+      sourceName: s.name,
+      sourceUrl: s.url,
+      itemTitle: s.name,
+      itemUrl: s.url,
+      credibility: s.credibility,
+    }));
+
     for (const issue of issues) {
+
       const id = generateId("iss");
       const now = new Date();
 
@@ -957,6 +1152,7 @@ Respond in JSON:
         title: issue.title,
         summary: issue.summary,
         patternIds: issue.patternIds,
+        sources: finalSources,
         headline: issue.headline,
         whyNow: issue.whyNow,
         keyNumber: issue.keyNumber,
@@ -984,6 +1180,41 @@ Respond in JSON:
 
       savedIds.push(id);
       eventBus.publish("issue.created", { issueId: id });
+
+      // Initialize Bayesian scores from IUTLN estimates
+      try {
+        const bayesianService = getBayesianScoringService();
+
+        // Extract pattern types from linked patterns
+        const patternTypes = patterns
+          .filter((p) => issue.patternIds.includes(p.title)) // Match by pattern ID
+          .map((p) => p.patternType)
+          .filter((t): t is NonNullable<typeof t> => t !== undefined);
+
+        await bayesianService.initializeIssue(
+          id,
+          issue.affectedDomains,
+          patternTypes,
+          {
+            // Map IUTLN legitimacy to P(real) adjustment
+            // High legitimacy suggests issue framing is likely correct
+            legitimacy: scores.legitimacy,
+            // Map IUTLN tractability to P(solvable) adjustment
+            // High tractability suggests intervention is likely to succeed
+            tractability: scores.tractability,
+            // Impact estimate from IUTLN
+            impact: scores.impact,
+            // Derive reach from urgency (higher urgency = broader reach)
+            reach: scores.urgency * 0.8 + 0.1,
+            // Derive cost from inverse of tractability (harder = more costly)
+            cost: (1 - scores.tractability) * 0.5,
+          }
+        );
+        console.log(`[Discovery] Initialized Bayesian scores for issue ${id}`);
+      } catch (bayesianError) {
+        console.error(`[Discovery] Failed to initialize Bayesian scores for issue ${id}:`, bayesianError);
+        // Don't fail the whole process if Bayesian initialization fails
+      }
     }
 
     return savedIds;
@@ -1237,6 +1468,182 @@ Respond in JSON:
     }
 
     return [];
+  }
+
+  // ============================================================================
+  // Feedback Loop Generation
+  // ============================================================================
+
+  private async generateFeedbackEvents(params: {
+    executionId: string;
+    playbookId: string;
+    success: boolean;
+    durationMs: number;
+    totalSteps: number;
+    stepsCompleted: number;
+    sourcesUsed: Array<{ id: string; name: string; url: string; credibility: number; itemCount: number }>;
+    patternIds: string[];
+    verificationIds: string[];
+    context: DiscoveryContext;
+  }): Promise<void> {
+    const db = getDatabase();
+    const feedbackRepo = new FeedbackEventRepository(db);
+    const learningRepo = new SystemLearningRepository(db);
+    const verificationRepo = new VerificationRepository(db);
+    const patternRepo = new PatternRepository(db);
+
+    try {
+      // 1. Create playbook execution feedback
+      await feedbackRepo.createPlaybookExecutionFeedback(
+        params.executionId,
+        params.playbookId,
+        {
+          success: params.success,
+          completionRate: params.stepsCompleted / params.totalSteps,
+          durationMs: params.durationMs,
+          stepsCompleted: params.stepsCompleted,
+          totalSteps: params.totalSteps,
+          errorCount: 0,
+        }
+      );
+      console.log(`[Feedback] Created playbook execution feedback for ${params.executionId}`);
+
+      // 2. Update playbook learning
+      await learningRepo.upsertLearning(
+        "playbook_effectiveness",
+        `playbook:${params.playbookId}`,
+        {
+          incrementSample: true,
+          incrementSuccess: params.success,
+          incrementFailure: !params.success,
+          avgEffectiveness: params.success ? 1.0 : 0.0,
+        }
+      );
+
+      // 3. Create verification feedback for pattern confidence adjustments
+      for (const verificationId of params.verificationIds) {
+        const verification = await verificationRepo.findById(verificationId);
+        if (!verification) continue;
+
+        // Find the pattern associated with this verification
+        // Verifications are linked to issues, which are linked to patterns
+        if (verification.sourceType === "issue" && verification.sourceId) {
+          const issueRepo = new IssueRepository(db);
+          const issue = await issueRepo.findById(verification.sourceId);
+          if (issue?.patternIds?.length) {
+            // Create feedback for the first linked pattern
+            const patternId = issue.patternIds[0];
+            const pattern = await patternRepo.findById(patternId);
+
+            if (pattern) {
+              await feedbackRepo.createVerificationFeedback(
+                verificationId,
+                patternId,
+                {
+                  verificationStatus: verification.status,
+                  originalConfidence: verification.originalConfidence,
+                  adjustedConfidence: verification.adjustedConfidence,
+                }
+              );
+
+              // Update pattern quality learning based on verification outcome
+              const verificationSuccessful = verification.status === "corroborated" ||
+                verification.status === "partially_supported";
+
+              await learningRepo.upsertLearning(
+                "pattern_quality",
+                `pattern_type:${pattern.patternType}`,
+                {
+                  incrementSample: true,
+                  incrementSuccess: verificationSuccessful,
+                  incrementFailure: !verificationSuccessful,
+                  avgConfidence: verification.adjustedConfidence,
+                }
+              );
+            }
+          }
+        }
+      }
+      console.log(`[Feedback] Created ${params.verificationIds.length} verification feedback events`);
+
+      // 4. Create source accuracy feedback for each source used
+      for (const source of params.sourcesUsed) {
+        // Calculate accuracy based on items fetched and source credibility
+        const accuracyScore = source.credibility;
+
+        await feedbackRepo.createSourceAccuracyFeedback(
+          params.executionId, // Use execution ID as source reference
+          source.url, // Domain/URL as target
+          {
+            accuracyScore,
+            verificationCount: source.itemCount,
+            alignment: "neutral", // No verification yet, neutral alignment
+          }
+        );
+
+        // Update source reliability learning
+        await learningRepo.upsertLearning(
+          "source_reliability",
+          `source:${new URL(source.url).hostname}`,
+          {
+            incrementSample: true,
+            avgAccuracy: accuracyScore,
+          }
+        );
+      }
+      console.log(`[Feedback] Created ${params.sourcesUsed.length} source accuracy feedback events`);
+
+      // 5. Update domain-specific learnings
+      for (const domain of params.context.domains) {
+        await learningRepo.upsertLearning(
+          "domain_discovery",
+          `domain:${domain}`,
+          {
+            incrementSample: true,
+            incrementSuccess: params.success,
+            avgEffectiveness: params.patternIds.length / (params.context.maxPatterns || 20),
+          }
+        );
+      }
+
+      // 6. Create pattern creation learnings
+      const avgPatternConfidence = await this.calculateAveragePatternConfidence(patternRepo, params.patternIds);
+      if (params.patternIds.length > 0) {
+        await learningRepo.upsertLearning(
+          "discovery_patterns",
+          "all_discoveries",
+          {
+            incrementSample: true,
+            avgConfidence: avgPatternConfidence,
+          }
+        );
+      }
+
+      console.log("[Feedback] Feedback loop closed successfully for discovery run");
+    } catch (error) {
+      console.error("[Feedback] Failed to generate feedback events:", error);
+      // Don't throw - feedback generation failure shouldn't fail the discovery
+    }
+  }
+
+  private async calculateAveragePatternConfidence(
+    patternRepo: PatternRepository,
+    patternIds: string[]
+  ): Promise<number> {
+    if (patternIds.length === 0) return 0;
+
+    let totalConfidence = 0;
+    let count = 0;
+
+    for (const id of patternIds) {
+      const pattern = await patternRepo.findById(id);
+      if (pattern?.confidence) {
+        totalConfidence += pattern.confidence;
+        count++;
+      }
+    }
+
+    return count > 0 ? totalConfidence / count : 0;
   }
 }
 

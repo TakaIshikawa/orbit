@@ -16,6 +16,8 @@ export * from "./source-health.js";
 export * from "./feedback.js";
 export * from "./managed-sources.js";
 export * from "./discovery-profiles.js";
+export * from "./reference-classes.js";
+export * from "./bayesian-updates.js";
 
 // Re-export types for convenience
 export type { PatternRow, NewPatternRow } from "../schema/patterns.js";
@@ -36,3 +38,6 @@ export type { SourceFetchLogRow, NewSourceFetchLogRow, SourceHealthRow, NewSourc
 export type { FeedbackEventRow, NewFeedbackEventRow, ConfidenceAdjustmentRow, NewConfidenceAdjustmentRow, SystemLearningRow, NewSystemLearningRow, EvaluationRunRow, NewEvaluationRunRow } from "../schema/feedback.js";
 export type { ManagedSourceRow, NewManagedSourceRow, SourceAssessmentHistoryRow, NewSourceAssessmentHistoryRow, SourceAssessmentInput } from "../schema/managed-sources.js";
 export type { DiscoveryProfileRow, NewDiscoveryProfileRow } from "../schema/discovery-profiles.js";
+export type { ReferenceClassRow, NewReferenceClassRow } from "../schema/reference-classes.js";
+export type { BayesianUpdateRow, NewBayesianUpdateRow } from "../schema/bayesian-updates.js";
+export type { BayesianScores, ExpectedValueQueryOptions } from "./issues.js";

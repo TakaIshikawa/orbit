@@ -8,7 +8,8 @@
 
 import { program } from "commander";
 import { z } from "zod";
-import { getDatabase, PatternRepository, IssueRepository, type PatternRow } from "@orbit/db";
+import { getDatabase, PatternRepository, IssueRepository, ReferenceClassRepository, BayesianUpdateRepository, type PatternRow } from "@orbit/db";
+import { generateId } from "@orbit/core";
 import { getLLMClient } from "@orbit/llm";
 import crypto from "crypto";
 
@@ -222,6 +223,102 @@ Output ${options.maxIssues} issues, each supported by at least ${options.minPatt
           createdIssues.push({ id, title: issue.title, issue });
           console.log(`  ✓ Saved: ${issue.title}`);
           saved++;
+
+          // Initialize Bayesian scores
+          try {
+            const refClassRepo = new ReferenceClassRepository(db);
+            const updateRepo = new BayesianUpdateRepository(db);
+
+            // Get pattern types from linked patterns
+            const linkedPatterns = patterns.filter(p => issue.patternIds.includes(p.id));
+            const patternTypes = [...new Set(linkedPatterns.map(p => p.patternType))];
+
+            // Find matching reference class
+            const refClass = await refClassRepo.findBestMatch(issue.affectedDomains, patternTypes);
+
+            // Set up priors from reference class or defaults
+            const priorPReal = refClass
+              ? { alpha: refClass.pRealAlpha, beta: refClass.pRealBeta }
+              : { alpha: 2, beta: 2 };
+            const priorPSolvable = refClass
+              ? { alpha: refClass.pSolvableAlpha, beta: refClass.pSolvableBeta }
+              : { alpha: 2, beta: 2 };
+
+            // Adjust priors with LLM estimates (weak evidence)
+            const adjustWithEstimate = (prior: { alpha: number; beta: number }, estimate: number) => {
+              const weight = 0.5;
+              const alphaDelta = weight * (estimate - 0.5) * 2;
+              const betaDelta = weight * (0.5 - estimate) * 2;
+              return {
+                alpha: Math.max(1, prior.alpha + alphaDelta),
+                beta: Math.max(1, prior.beta + betaDelta),
+              };
+            };
+
+            const adjustedPReal = adjustWithEstimate(priorPReal, issue.scoreLegitimacy);
+            const adjustedPSolvable = adjustWithEstimate(priorPSolvable, issue.scoreTractability);
+
+            // Calculate Bayesian scores
+            const bayesianScores = {
+              pReal: {
+                alpha: adjustedPReal.alpha,
+                beta: adjustedPReal.beta,
+                mean: adjustedPReal.alpha / (adjustedPReal.alpha + adjustedPReal.beta),
+              },
+              pSolvable: {
+                alpha: adjustedPSolvable.alpha,
+                beta: adjustedPSolvable.beta,
+                mean: adjustedPSolvable.alpha / (adjustedPSolvable.alpha + adjustedPSolvable.beta),
+              },
+              impact: { estimate: issue.scoreImpact, confidence: 0.5 },
+              reach: { estimate: issue.scoreUrgency * 0.8 + 0.1, confidence: 0.3 },
+              cost: { estimate: (1 - issue.scoreTractability) * 0.5, confidence: 0.4 },
+              lastUpdatedAt: new Date().toISOString(),
+            };
+
+            // Calculate Expected Value
+            const value = bayesianScores.pReal.mean * bayesianScores.pSolvable.mean *
+                          bayesianScores.impact.estimate * bayesianScores.reach.estimate;
+            const expectedValue = Math.max(-1, Math.min(1, value - bayesianScores.cost.estimate));
+
+            // Calculate confidence
+            const pRealConf = 1 - 1 / Math.max(1, bayesianScores.pReal.alpha + bayesianScores.pReal.beta - 1);
+            const pSolvableConf = 1 - 1 / Math.max(1, bayesianScores.pSolvable.alpha + bayesianScores.pSolvable.beta - 1);
+            const evConfidence = Math.pow(
+              pRealConf * pSolvableConf * 0.5 * 0.3 * 0.4,
+              1 / 5
+            );
+
+            // Update issue with Bayesian scores
+            await issueRepo.update(id, {
+              referenceClassId: refClass?.id ?? "refclass_default",
+              bayesianScores,
+              expectedValue,
+              evConfidence,
+            });
+
+            // Record initial updates in audit trail
+            await updateRepo.recordUpdate({
+              id: generateId("bup"),
+              entityType: "issue",
+              entityId: id,
+              updateType: "p_real",
+              priorAlpha: priorPReal.alpha,
+              priorBeta: priorPReal.beta,
+              posteriorAlpha: adjustedPReal.alpha,
+              posteriorBeta: adjustedPReal.beta,
+              evidenceType: "initial",
+              evidenceDirection: issue.scoreLegitimacy >= 0.5 ? "positive" : "negative",
+              reason: `Initialized from reference class "${refClass?.name ?? "default"}" via CLI analyze`,
+            });
+
+            if (options.verbose) {
+              console.log(`     📊 Bayesian EV: ${(expectedValue * 100).toFixed(1)}% (confidence: ${(evConfidence * 100).toFixed(0)}%)`);
+            }
+          } catch (bayesianError) {
+            console.log(`  ⚠️  Bayesian scoring failed for ${issue.title}: ${bayesianError}`);
+            // Don't fail the whole process if Bayesian initialization fails
+          }
         }
 
         // Second pass: Resolve relationship strings to actual issue IDs

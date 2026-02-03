@@ -16,3 +16,5 @@ export * from "./source-health.js";
 export * from "./feedback.js";
 export * from "./managed-sources.js";
 export * from "./discovery-profiles.js";
+export * from "./reference-classes.js";
+export * from "./bayesian-updates.js";

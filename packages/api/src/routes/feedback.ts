@@ -9,7 +9,9 @@ import {
   EvaluationRunRepository,
   PatternRepository,
   SourceHealthRepository,
+  IssueRepository,
 } from "@orbit/db";
+import { getBayesianScoringService } from "../services/bayesian-scoring.js";
 
 export const feedbackRoutes = new Hono();
 
@@ -317,6 +319,24 @@ feedbackRoutes.post("/process", async (c) => {
               );
               learningsUpdated++;
             }
+          }
+
+          // Update Bayesian P(real) for linked issues
+          // sourceEntityId is the verification ID
+          try {
+            const bayesianService = getBayesianScoringService();
+            await bayesianService.processVerification(event.sourceEntityId);
+          } catch (bayesianError) {
+            console.error(`[Feedback] Bayesian update failed for verification ${event.sourceEntityId}:`, bayesianError);
+            // Don't fail the event processing if Bayesian update fails
+          }
+        } else if (event.feedbackType === "solution_outcome") {
+          // Update Bayesian P(solvable) for linked issues
+          try {
+            const bayesianService = getBayesianScoringService();
+            await bayesianService.processSolutionOutcome(event.sourceEntityId);
+          } catch (bayesianError) {
+            console.error(`[Feedback] Bayesian update failed for outcome ${event.sourceEntityId}:`, bayesianError);
           }
         } else if (event.feedbackType === "source_accuracy") {
           // Process source accuracy feedback - adjust source reliability

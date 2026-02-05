@@ -21,3 +21,4 @@ export * from "./bayesian-updates.js";
 export * from "./causal-claims.js";
 export * from "./adversarial-validations.js";
 export * from "./predictions.js";
+export * from "./information-units.js";

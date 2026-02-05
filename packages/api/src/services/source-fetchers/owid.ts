@@ -94,14 +94,57 @@ export class OWIDFetcher implements SourceFetcher {
       }
     }
 
+    // Compute relevance scores based on recency and topic match
+    const scoredItems = items.map(item => ({
+      ...item,
+      relevanceScore: this.computeRelevanceScore(item, options.keywords, topics),
+    }));
+
+    // Sort by relevance score
+    scoredItems.sort((a, b) => (b.relevanceScore ?? 0) - (a.relevanceScore ?? 0));
+
     return {
       sourceId: source.id,
       sourceName: source.name,
       sourceUrl: source.url,
-      items,
+      items: scoredItems,
       fetchedAt: new Date(),
       credibility: source.credibility,
     };
+  }
+
+  /**
+   * Compute relevance score based on recency and topic match
+   * OWID doesn't have citation data, so we weight recency more heavily
+   */
+  private computeRelevanceScore(item: FetchedItem, keywords: string[], topics: string[]): number {
+    let score = 0;
+
+    // Recency score (0-0.5): stronger weight since OWID is about current data
+    if (item.publishedAt) {
+      const daysSincePublished = (Date.now() - item.publishedAt.getTime()) / (1000 * 60 * 60 * 24);
+      // Half-life of 60 days for OWID articles (longer than academic papers)
+      const recencyScore = Math.exp(-daysSincePublished / 60) * 0.5;
+      score += recencyScore;
+    }
+
+    // Topic match score (0-0.3)
+    const textToSearch = `${item.title} ${item.summary}`.toLowerCase();
+    const allTopics = [...keywords, ...topics];
+    if (allTopics.length > 0) {
+      const matchCount = allTopics.filter(t => textToSearch.includes(t.toLowerCase())).length;
+      const topicScore = (matchCount / allTopics.length) * 0.3;
+      score += topicScore;
+    }
+
+    // Content depth score (0-0.2): longer summaries indicate more substantive articles
+    if (item.summary) {
+      const wordCount = item.summary.split(/\s+/).length;
+      const depthScore = Math.min(1, wordCount / 500) * 0.2; // Max score at 500 words
+      score += depthScore;
+    }
+
+    return Math.min(1, score);
   }
 
   private async fetchLatestArticles(topics: string[], maxItems: number): Promise<OWIDArticle[]> {

@@ -24,6 +24,18 @@ export interface FetchedItem {
   authors: string[];
   categories: string[];
   metadata: Record<string, unknown>;
+  // Popularity/attention metrics (populated by enrichers)
+  popularity?: {
+    citationCount?: number;        // Total citations
+    influentialCitationCount?: number; // Citations from influential papers
+    referenceCount?: number;       // Number of references in this paper
+    downloadCount?: number;        // Downloads (if available)
+    viewCount?: number;            // Views (if available)
+    altmetricScore?: number;       // Altmetric attention score
+    trendingScore?: number;        // Computed trending score (recency + velocity)
+  };
+  // Computed relevance score (0-1) based on recency + popularity + topic match
+  relevanceScore?: number;
 }
 
 export interface SourceFetcher {
@@ -49,3 +61,4 @@ export { ArxivFetcher } from './arxiv.js';
 export { OWIDFetcher } from './owid.js';
 export { RSSFetcher } from './rss.js';
 export { SourceFetcherRegistry } from './registry.js';
+export { SemanticScholarEnricher, getSemanticScholarEnricher } from './semantic-scholar.js';

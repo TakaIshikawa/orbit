@@ -233,10 +233,26 @@ export class EnhancedDiscoveryExecutor {
         itemCount: fc.items.length,
       }));
 
+      // Log item counts and popularity metrics
+      const totalItems = fetchedContent.reduce((sum, fc) => sum + fc.items.length, 0);
+      const itemsWithCitations = fetchedContent.reduce(
+        (sum, fc) => sum + fc.items.filter(i => i.popularity?.citationCount).length,
+        0
+      );
+      const avgCitations = itemsWithCitations > 0
+        ? Math.round(
+            fetchedContent.reduce(
+              (sum, fc) => sum + fc.items.reduce((s, i) => s + (i.popularity?.citationCount || 0), 0),
+              0
+            ) / itemsWithCitations
+          )
+        : 0;
+
       await executionRepo.appendLog(
         executionId,
         "info",
-        `Fetched ${fetchedContent.reduce((sum, fc) => sum + fc.items.length, 0)} items from ${fetchedContent.length} sources`,
+        `Fetched ${totalItems} items from ${fetchedContent.length} sources` +
+        (itemsWithCitations > 0 ? ` (${itemsWithCitations} with citation data, avg ${avgCitations} citations)` : ""),
         0
       );
 
@@ -479,8 +495,18 @@ export class EnhancedDiscoveryExecutor {
       const items = content.items.slice(0, 10);
       const itemMap = new Map(items.map((item, idx) => [idx, item]));
 
+      // Include popularity metrics in source text for context
       const sourceText = items
-        .map((item, idx) => `[ITEM_${idx}] "${item.title}" (${item.url})\n${item.summary || item.content.slice(0, 500)}`)
+        .map((item, idx) => {
+          let header = `[ITEM_${idx}] "${item.title}" (${item.url})`;
+          if (item.popularity?.citationCount) {
+            header += ` [${item.popularity.citationCount} citations]`;
+          }
+          if (item.publishedAt) {
+            header += ` [${item.publishedAt.toISOString().split('T')[0]}]`;
+          }
+          return `${header}\n${item.summary || item.content.slice(0, 500)}`;
+        })
         .join("\n\n---\n\n");
 
       const prompt = `Extract key factual claims from this source content. Focus on claims that are:

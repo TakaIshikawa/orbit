@@ -8,6 +8,7 @@
  */
 
 import type { SourceFetcher, FetchedContent, FetchedItem, FetchOptions } from './index.js';
+import { getSemanticScholarEnricher } from './semantic-scholar.js';
 
 const ARXIV_API_BASE = 'https://export.arxiv.org/api/query';
 
@@ -70,7 +71,26 @@ export class ArxivFetcher implements SourceFetcher {
     }
 
     const xml = await response.text();
-    const items = this.parseAtomFeed(xml);
+    let items = this.parseAtomFeed(xml);
+
+    // Enrich with citation data from Semantic Scholar
+    try {
+      const enricher = getSemanticScholarEnricher();
+      items = await enricher.enrichPapers(items);
+
+      // Compute relevance scores
+      items = items.map(item => ({
+        ...item,
+        relevanceScore: enricher.computeRelevanceScore(item, options.keywords),
+      }));
+
+      // Sort by relevance score (highest first)
+      items.sort((a, b) => (b.relevanceScore ?? 0) - (a.relevanceScore ?? 0));
+
+      console.log(`[arXiv] Enriched ${items.length} papers with citation data`);
+    } catch (enrichError) {
+      console.warn('[arXiv] Citation enrichment failed, using raw results:', enrichError);
+    }
 
     return {
       sourceId: source.id,

@@ -9,6 +9,10 @@ import type { SourceFetcher, FetchedContent, FetchOptions } from './index.js';
 import { ArxivFetcher } from './arxiv.js';
 import { OWIDFetcher } from './owid.js';
 import { RSSFetcher } from './rss.js';
+import { WorldBankFetcher } from './world-bank.js';
+import { WHOFetcher } from './who.js';
+import { CochraneFetcher } from './cochrane.js';
+import { ReutersFetcher } from './reuters.js';
 
 export class SourceFetcherRegistry {
   private fetchers: SourceFetcher[] = [];
@@ -19,6 +23,10 @@ export class SourceFetcherRegistry {
     this.fetchers = [
       new ArxivFetcher(),
       new OWIDFetcher(),
+      new WorldBankFetcher(),
+      new WHOFetcher(),
+      new CochraneFetcher(),
+      new ReutersFetcher(),
       new RSSFetcher(), // Fallback for generic feeds
     ];
   }

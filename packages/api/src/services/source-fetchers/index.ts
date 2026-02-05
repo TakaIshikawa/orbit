@@ -60,5 +60,9 @@ export interface FetchOptions {
 export { ArxivFetcher } from './arxiv.js';
 export { OWIDFetcher } from './owid.js';
 export { RSSFetcher } from './rss.js';
+export { WorldBankFetcher } from './world-bank.js';
+export { WHOFetcher } from './who.js';
+export { CochraneFetcher } from './cochrane.js';
+export { ReutersFetcher } from './reuters.js';
 export { SourceFetcherRegistry } from './registry.js';
 export { SemanticScholarEnricher, getSemanticScholarEnricher } from './semantic-scholar.js';

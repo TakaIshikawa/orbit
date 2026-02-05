@@ -5,8 +5,8 @@
  * Enables granularity-aware triangulation and cross-validation.
  */
 
-import { eq, and, inArray, sql, desc } from "drizzle-orm";
-import type { DbClient } from "../client.js";
+import { eq, and, sql, desc } from "drizzle-orm";
+import type { Database } from "../client.js";
 import {
   informationUnits,
   unitComparisons,
@@ -22,7 +22,7 @@ import { generateId } from "@orbit/core";
 import crypto from "crypto";
 
 export class InformationUnitRepository {
-  constructor(private db: DbClient) {}
+  constructor(private db: Database) {}
 
   // ============================================================================
   // Information Units CRUD
@@ -104,9 +104,9 @@ export class InformationUnitRepository {
 
     // Filter by domains if specified (JSONB containment)
     if (options?.domains && options.domains.length > 0) {
-      return results.filter((unit) => {
+      return results.filter((unit: InformationUnitRow) => {
         const unitDomains = (unit.domains as string[]) || [];
-        return options.domains!.some((d) => unitDomains.includes(d));
+        return options.domains!.some((d: string) => unitDomains.includes(d));
       });
     }
 
@@ -137,7 +137,7 @@ export class InformationUnitRepository {
       ...((unit.domains as string[]) || []),
     ]);
 
-    const scored = sameLevel.map((other) => {
+    const scored = sameLevel.map((other: InformationUnitRow) => {
       const otherConcepts = new Set([
         ...((other.concepts as string[]) || []),
         ...((other.domains as string[]) || []),
@@ -167,10 +167,11 @@ export class InformationUnitRepository {
 
     // Filter and sort
     const minOverlap = options?.minConceptOverlap || 0.1;
+    type ScoredUnit = { unit: InformationUnitRow; comparability: number; conceptOverlap: number };
     return scored
-      .filter((s) => s.comparability >= 0.3 && s.conceptOverlap >= minOverlap)
-      .sort((a, b) => b.comparability - a.comparability)
-      .map((s) => s.unit);
+      .filter((s: ScoredUnit) => s.comparability >= 0.3 && s.conceptOverlap >= minOverlap)
+      .sort((a: ScoredUnit, b: ScoredUnit) => b.comparability - a.comparability)
+      .map((s: ScoredUnit) => s.unit);
   }
 
   /**
@@ -374,11 +375,11 @@ export class InformationUnitRepository {
         sql`${unitComparisons.unitAId} = ANY(${unitIds}) OR ${unitComparisons.unitBId} = ANY(${unitIds})`
       );
 
-    const agreements = comparisons.filter((c) => c.relationship === "agrees").length;
-    const contradictions = comparisons.filter((c) => c.relationship === "contradicts").length;
+    const agreements = comparisons.filter((c: UnitComparisonRow) => c.relationship === "agrees").length;
+    const contradictions = comparisons.filter((c: UnitComparisonRow) => c.relationship === "contradicts").length;
     const avgAgreementScore =
       comparisons.length > 0
-        ? comparisons.reduce((sum, c) => sum + c.agreementScore, 0) / comparisons.length
+        ? comparisons.reduce((sum: number, c: UnitComparisonRow) => sum + c.agreementScore, 0) / comparisons.length
         : 0;
 
     return {

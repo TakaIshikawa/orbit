@@ -55,6 +55,12 @@ export const playbookExecutions = pgTable("playbook_executions", {
       itemCount: number;
     }>;
     deduplicatedPatterns?: number;
+    // Information decomposition stats
+    decomposition?: {
+      totalUnits: number;
+      comparisons: number;
+      contradictions: number;
+    };
     message?: string;
   }>().default({}),
 

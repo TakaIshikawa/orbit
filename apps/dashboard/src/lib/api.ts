@@ -1406,6 +1406,35 @@ class ApiClient {
     const query = searchParams.toString();
     return this.request(`/discovery/runs${query ? `?${query}` : ""}`);
   }
+
+  // Information Units
+  async getInformationUnitsSummary(issueId: string): Promise<SingleResponse<InformationUnitsSummary>> {
+    return this.request(`/information-units/issue/${issueId}/summary`);
+  }
+
+  async getInformationUnits(params?: {
+    issueId?: string;
+    sourceId?: string;
+    level?: string;
+    limit?: number;
+  }): Promise<{ data: InformationUnit[] }> {
+    const searchParams = new URLSearchParams();
+    if (params?.issueId) searchParams.set("issueId", params.issueId);
+    if (params?.sourceId) searchParams.set("sourceId", params.sourceId);
+    if (params?.level) searchParams.set("level", params.level);
+    if (params?.limit) searchParams.set("limit", params.limit.toString());
+
+    const query = searchParams.toString();
+    return this.request(`/information-units${query ? `?${query}` : ""}`);
+  }
+
+  async getContradictions(params?: { limit?: number }): Promise<{ data: Contradiction[] }> {
+    const searchParams = new URLSearchParams();
+    if (params?.limit) searchParams.set("limit", params.limit.toString());
+
+    const query = searchParams.toString();
+    return this.request(`/information-units/contradictions${query ? `?${query}` : ""}`);
+  }
 }
 
 // Outcome types
@@ -1652,6 +1681,99 @@ export interface DiscoveryRun {
     message: string;
     stepIndex?: number;
   }>;
+}
+
+// Information Units types
+export interface InformationUnit {
+  id: string;
+  sourceId: string;
+  sourceName: string;
+  sourceUrl: string;
+  itemUrl: string;
+  itemTitle: string;
+  excerpt: string;
+  granularityLevel: "paradigm" | "theory" | "mechanism" | "causal_claim" | "statistical" | "observation" | "data_point";
+  granularityConfidence: number;
+  statement: string;
+  statementHash: string;
+  temporalScope: "timeless" | "era" | "period" | "recent" | "current" | "point";
+  temporalSpecifics: Record<string, unknown> | null;
+  spatialScope: "universal" | "global" | "regional" | "national" | "local" | "specific";
+  spatialSpecifics: Record<string, unknown> | null;
+  domains: string[];
+  concepts: string[];
+  measurability: "quantitative" | "semi_quantitative" | "qualitative" | "conceptual";
+  quantitativeData: Record<string, unknown> | null;
+  falsifiabilityScore: number;
+  falsifiabilityCriteria: Record<string, unknown> | null;
+  priorConfidence: number;
+  currentConfidence: number;
+  updateCount: number;
+  sourceAuthorityForLevel: number;
+  issueId: string | null;
+  parentUnitId: string | null;
+  derivedFromUnits: string[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface GranularityLevelInfo {
+  level: string;
+  name: string;
+  falsifiability: number;
+  description: string;
+  unitCount: number;
+  avgConfidence: number | null;
+  sampleUnits: InformationUnit[];
+}
+
+export interface InformationUnitsSummary {
+  issueId: string;
+  totalUnits: number;
+  granularityBreakdown: GranularityLevelInfo[];
+  comparisonStats: {
+    totalComparisons: number;
+    agreements: number;
+    contradictions: number;
+    avgAgreementScore: number;
+  };
+  consistency: {
+    overall: number;
+    weighted: number;
+    supportByLevel: Record<string, unknown>;
+    strongestSupport: unknown | null;
+    strongestChallenges: unknown | null;
+    recommendedConfidenceUpdate: number | null;
+    updateRationale: string | null;
+  } | null;
+}
+
+export interface Contradiction {
+  id: string;
+  unitAId: string;
+  unitBId: string;
+  granularityLevel: string;
+  comparabilityScore: number;
+  comparabilityFactors: Record<string, unknown> | null;
+  relationship: string;
+  agreementScore: number;
+  contradictionType: string | null;
+  contradictionAnalysis: Record<string, unknown> | null;
+  netConfidenceImpact: number;
+  impactExplanation: string | null;
+  createdAt: string;
+  unitA: {
+    id: string;
+    statement: string;
+    sourceName: string;
+    granularityLevel: string;
+  } | null;
+  unitB: {
+    id: string;
+    statement: string;
+    sourceName: string;
+    granularityLevel: string;
+  } | null;
 }
 
 export const api = new ApiClient();

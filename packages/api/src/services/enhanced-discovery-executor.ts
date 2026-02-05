@@ -343,6 +343,21 @@ export class EnhancedDiscoveryExecutor {
           `Decomposition complete: ${decompositionStats.totalUnits} units, ${decompositionStats.comparisons} comparisons, ${decompositionStats.contradictions} contradictions`,
           3
         );
+
+        // Update Bayesian P(real) based on consistency
+        if (decompositionStats.totalUnits > 0) {
+          const { getBayesianScoringService } = await import("./bayesian-scoring.js");
+          const bayesianService = getBayesianScoringService();
+          for (const issue of savedIssues) {
+            await bayesianService.processConsistency(issue.id);
+          }
+          await executionRepo.appendLog(
+            executionId,
+            "info",
+            `Updated Bayesian P(real) for ${savedIssues.length} issues based on consistency`,
+            3
+          );
+        }
       }
 
       // Step 5: Generate solutions

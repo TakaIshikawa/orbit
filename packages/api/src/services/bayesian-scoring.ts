@@ -519,6 +519,123 @@ export class BayesianScoringService {
   }
 
   // ============================================================================
+  // Process Information Unit Consistency
+  // ============================================================================
+
+  /**
+   * Update P(real) based on information unit consistency analysis.
+   *
+   * Consistency scores from decomposed units provide evidence for issue validity:
+   * - High consistency (>0.7) with many units → positive evidence
+   * - Low consistency (<0.4) or contradictions → negative evidence
+   * - Weighted by falsifiability (concrete claims weigh more)
+   */
+  async processConsistency(issueId: string): Promise<void> {
+    const db = getDatabase();
+    const { InformationUnitRepository } = await import("@orbit/db");
+    const unitRepo = new InformationUnitRepository(db);
+
+    const issue = await this.issueRepo.findById(issueId);
+    if (!issue || !issue.bayesianScores) {
+      console.log(`[Bayesian] Issue ${issueId} not found or has no Bayesian scores`);
+      return;
+    }
+
+    // Get consistency data
+    const consistency = await unitRepo.getConsistency("issue", issueId);
+    const unitCountsByLevel = await unitRepo.getUnitCountsByLevel(issueId);
+    const comparisonStats = await unitRepo.getComparisonStats(issueId);
+
+    const totalUnits = Object.values(unitCountsByLevel).reduce((a, b) => a + b, 0);
+    if (totalUnits < 3) {
+      console.log(`[Bayesian] Issue ${issueId} has insufficient units (${totalUnits}) for consistency update`);
+      return;
+    }
+
+    const scores = issue.bayesianScores as BayesianScores;
+    const priorAlpha = scores.pReal.alpha;
+    const priorBeta = scores.pReal.beta;
+
+    // Calculate update based on consistency metrics
+    let posteriorAlpha = priorAlpha;
+    let posteriorBeta = priorBeta;
+    let evidenceDirection: "positive" | "negative" = "positive";
+    let reason = "";
+
+    const weightedConsistency = consistency?.weightedConsistency || 0.5;
+    const contradictionRate = comparisonStats.totalComparisons > 0
+      ? comparisonStats.contradictions / comparisonStats.totalComparisons
+      : 0;
+
+    // Scale update by evidence strength (more units = stronger signal)
+    const evidenceStrength = Math.min(1, totalUnits / 20); // Max at 20 units
+
+    if (weightedConsistency >= 0.7 && contradictionRate < 0.2) {
+      // Strong consistency - positive evidence
+      const increment = 0.5 * evidenceStrength * (weightedConsistency - 0.5);
+      posteriorAlpha = priorAlpha + increment;
+      evidenceDirection = "positive";
+      reason = `High consistency (${(weightedConsistency * 100).toFixed(0)}%) across ${totalUnits} units, ${comparisonStats.agreements} agreements`;
+    } else if (weightedConsistency < 0.4 || contradictionRate > 0.3) {
+      // Low consistency or many contradictions - negative evidence
+      const decrement = 0.5 * evidenceStrength * Math.max(0.5 - weightedConsistency, contradictionRate);
+      posteriorBeta = priorBeta + decrement;
+      evidenceDirection = "negative";
+      reason = `Low consistency (${(weightedConsistency * 100).toFixed(0)}%) or high contradictions (${comparisonStats.contradictions}/${comparisonStats.totalComparisons})`;
+    } else {
+      // Mixed evidence - smaller update toward consistency
+      const delta = 0.2 * evidenceStrength * (weightedConsistency - 0.5);
+      if (delta > 0) {
+        posteriorAlpha = priorAlpha + delta;
+        evidenceDirection = "positive";
+      } else {
+        posteriorBeta = priorBeta - delta;
+        evidenceDirection = "negative";
+      }
+      reason = `Mixed consistency (${(weightedConsistency * 100).toFixed(0)}%) from ${totalUnits} units`;
+    }
+
+    // Only update if there was meaningful change
+    if (Math.abs(posteriorAlpha - priorAlpha) < 0.05 && Math.abs(posteriorBeta - priorBeta) < 0.05) {
+      return;
+    }
+
+    // Update issue
+    const newMean = posteriorAlpha / (posteriorAlpha + posteriorBeta);
+    const updatedScores: BayesianScores = {
+      ...scores,
+      pReal: { alpha: posteriorAlpha, beta: posteriorBeta, mean: newMean },
+      lastUpdatedAt: new Date().toISOString(),
+    };
+
+    await this.issueRepo.update(issueId, {
+      bayesianScores: updatedScores,
+      expectedValue: this.computeExpectedValue(updatedScores),
+      evConfidence: this.computeEVConfidence(updatedScores),
+    });
+
+    // Record update
+    await this.updateRepo.recordUpdate({
+      id: generateId("bup"),
+      entityType: "issue",
+      entityId: issueId,
+      updateType: "p_real",
+      priorAlpha,
+      priorBeta,
+      posteriorAlpha,
+      posteriorBeta,
+      evidenceType: "consistency",
+      evidenceId: null,
+      evidenceDirection,
+      reason,
+    });
+
+    console.log(
+      `[Bayesian] Updated issue ${issueId} P(real) from consistency: ${(priorAlpha / (priorAlpha + priorBeta)).toFixed(3)} → ${newMean.toFixed(3)} (${reason})`
+    );
+  }
+
+  // ============================================================================
   // Explain Score
   // ============================================================================
 

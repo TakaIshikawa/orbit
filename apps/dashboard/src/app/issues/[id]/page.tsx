@@ -4,7 +4,7 @@ import { useState, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useParams, useSearchParams } from "next/navigation";
 import Link from "next/link";
-import { api, type Solution, type Verification, type Issue, type SimpleStatus, type Outcome, type CausalClaim, type AdversarialChallenge, type Prediction, type ValidationSummary, type ChallengeStats } from "@/lib/api";
+import { api, type Solution, type Verification, type Issue, type SimpleStatus, type Outcome, type CausalClaim, type AdversarialChallenge, type Prediction, type ValidationSummary, type ChallengeStats, type InformationUnitsSummary } from "@/lib/api";
 import { IssueRelationshipGraph } from "@/components/issue-relationship-graph";
 import { OutcomeRecordingModal } from "@/components/outcome-recording-modal";
 
@@ -76,6 +76,12 @@ export default function IssueDetailPage() {
     enabled: !!id,
   });
 
+  const { data: informationUnitsData, isLoading: informationUnitsLoading } = useQuery({
+    queryKey: ["information-units-summary", id],
+    queryFn: () => api.getInformationUnitsSummary(id).catch(() => ({ data: null })),
+    enabled: !!id,
+  });
+
   const assignMutation = useMutation({
     mutationFn: ({ solutionId, userId }: { solutionId: string; userId: string }) =>
       api.assignSolution(solutionId, userId),
@@ -143,6 +149,7 @@ export default function IssueDetailPage() {
   const solutions = solutionsData?.data ?? [];
   const verifications = verificationsData?.data ?? [];
   const validationSummary = validationSummaryData?.data;
+  const informationUnitsSummary = informationUnitsData?.data;
 
   // Separate solutions by status
   const proposedSolutions = solutions.filter(s => s.solutionStatus === "proposed" || s.solutionStatus === "approved");
@@ -351,7 +358,12 @@ export default function IssueDetailPage() {
           <TheProblemTab issue={issue} brief={brief} situation={situation} />
         )}
         {activeTab === "evidence" && (
-          <TheEvidenceTab verifications={verifications} isLoading={verificationsLoading} />
+          <TheEvidenceTab
+            verifications={verifications}
+            isLoading={verificationsLoading}
+            informationUnitsSummary={informationUnitsSummary}
+            informationUnitsLoading={informationUnitsLoading}
+          />
         )}
         {activeTab === "validation" && (
           <ValidationTab issueId={id} summary={validationSummary} />
@@ -695,17 +707,22 @@ function TheProblemTab({
 function TheEvidenceTab({
   verifications,
   isLoading,
+  informationUnitsSummary,
+  informationUnitsLoading,
 }: {
   verifications: Verification[];
   isLoading: boolean;
+  informationUnitsSummary?: InformationUnitsSummary | null;
+  informationUnitsLoading?: boolean;
 }) {
   const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [showGranularityDetails, setShowGranularityDetails] = useState(false);
 
   if (isLoading) {
     return <div className="animate-pulse text-gray-400">Loading evidence...</div>;
   }
 
-  if (verifications.length === 0) {
+  if (verifications.length === 0 && !informationUnitsSummary) {
     return (
       <div className="text-center py-12 text-gray-500">
         <p className="mb-2">No evidence verification data yet</p>
@@ -756,6 +773,165 @@ function TheEvidenceTab({
           <div className="text-xs text-gray-500">Avg Confidence</div>
         </div>
       </div>
+
+      {/* Information Units / Granularity Breakdown */}
+      {informationUnitsLoading ? (
+        <div className="border border-gray-800 rounded-lg p-4">
+          <div className="animate-pulse text-gray-400">Loading information units...</div>
+        </div>
+      ) : informationUnitsSummary && informationUnitsSummary.totalUnits > 0 && (
+        <div className="border border-cyan-900/50 rounded-lg overflow-hidden">
+          <button
+            onClick={() => setShowGranularityDetails(!showGranularityDetails)}
+            className="w-full p-4 flex items-center justify-between text-left hover:bg-gray-800/30 transition-colors"
+          >
+            <div>
+              <h3 className="font-semibold text-cyan-300">
+                Information Decomposition ({informationUnitsSummary.totalUnits} units)
+              </h3>
+              <p className="text-sm text-gray-500 mt-1">
+                Claims decomposed by falsifiability level for granularity-aware triangulation
+              </p>
+            </div>
+            <div className="flex items-center gap-4">
+              {informationUnitsSummary.consistency && (
+                <div className="text-right">
+                  <div className={`text-lg font-bold ${
+                    informationUnitsSummary.consistency.overall >= 0.7 ? "text-green-400" :
+                    informationUnitsSummary.consistency.overall >= 0.4 ? "text-yellow-400" : "text-red-400"
+                  }`}>
+                    {(informationUnitsSummary.consistency.overall * 100).toFixed(0)}%
+                  </div>
+                  <div className="text-xs text-gray-500">consistency</div>
+                </div>
+              )}
+              <span className={`text-gray-400 transition-transform ${showGranularityDetails ? "rotate-180" : ""}`}>
+                ▼
+              </span>
+            </div>
+          </button>
+
+          {showGranularityDetails && (
+            <div className="border-t border-gray-800 p-4 space-y-4 bg-gray-900/30">
+              {/* Granularity Level Breakdown */}
+              <div className="space-y-2">
+                {informationUnitsSummary.granularityBreakdown
+                  .filter(level => level.unitCount > 0)
+                  .map((level) => (
+                    <div key={level.level} className="flex items-center gap-3">
+                      <div className="w-28 text-sm text-gray-400">{level.name}</div>
+                      <div className="flex-1 h-4 bg-gray-800 rounded-full overflow-hidden">
+                        <div
+                          className="h-full bg-gradient-to-r from-cyan-600 to-cyan-400 rounded-full"
+                          style={{
+                            width: `${(level.unitCount / informationUnitsSummary.totalUnits) * 100}%`,
+                          }}
+                        />
+                      </div>
+                      <div className="w-12 text-sm text-right">{level.unitCount}</div>
+                      <div className={`w-12 text-sm text-right ${
+                        level.falsifiability >= 0.7 ? "text-green-400" :
+                        level.falsifiability >= 0.4 ? "text-yellow-400" : "text-red-400"
+                      }`}>
+                        {(level.falsifiability * 100).toFixed(0)}%
+                      </div>
+                      {level.avgConfidence !== null && (
+                        <div className="w-16 text-xs text-gray-500 text-right">
+                          conf: {(level.avgConfidence * 100).toFixed(0)}%
+                        </div>
+                      )}
+                    </div>
+                  ))}
+              </div>
+
+              {/* Falsifiability Legend */}
+              <div className="flex items-center gap-4 text-xs text-gray-500 border-t border-gray-800 pt-3">
+                <span>Falsifiability:</span>
+                <span className="text-green-400">High (testable)</span>
+                <span className="text-yellow-400">Medium</span>
+                <span className="text-red-400">Low (unfalsifiable)</span>
+              </div>
+
+              {/* Consistency Details */}
+              {informationUnitsSummary.consistency && (
+                <div className="border-t border-gray-800 pt-4 space-y-3">
+                  <h4 className="text-sm font-medium text-gray-400">Cross-Source Consistency</h4>
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                    <div className="bg-gray-800/50 rounded p-2">
+                      <div className={`text-lg font-bold ${
+                        informationUnitsSummary.consistency.overall >= 0.7 ? "text-green-400" :
+                        informationUnitsSummary.consistency.overall >= 0.4 ? "text-yellow-400" : "text-red-400"
+                      }`}>
+                        {(informationUnitsSummary.consistency.overall * 100).toFixed(0)}%
+                      </div>
+                      <div className="text-xs text-gray-500">Overall</div>
+                    </div>
+                    <div className="bg-gray-800/50 rounded p-2">
+                      <div className={`text-lg font-bold ${
+                        informationUnitsSummary.consistency.weighted >= 0.7 ? "text-green-400" :
+                        informationUnitsSummary.consistency.weighted >= 0.4 ? "text-yellow-400" : "text-red-400"
+                      }`}>
+                        {(informationUnitsSummary.consistency.weighted * 100).toFixed(0)}%
+                      </div>
+                      <div className="text-xs text-gray-500">Weighted</div>
+                    </div>
+                    {informationUnitsSummary.consistency.recommendedConfidenceUpdate != null && (
+                      <div className="bg-gray-800/50 rounded p-2">
+                        <div className={`text-lg font-bold ${
+                          informationUnitsSummary.consistency.recommendedConfidenceUpdate > 0 ? "text-green-400" :
+                          informationUnitsSummary.consistency.recommendedConfidenceUpdate < 0 ? "text-red-400" : "text-gray-400"
+                        }`}>
+                          {informationUnitsSummary.consistency.recommendedConfidenceUpdate > 0 ? "+" : ""}
+                          {(informationUnitsSummary.consistency.recommendedConfidenceUpdate * 100).toFixed(0)}%
+                        </div>
+                        <div className="text-xs text-gray-500">Recommended Update</div>
+                      </div>
+                    )}
+                  </div>
+                  {informationUnitsSummary.consistency.updateRationale && (
+                    <p className="text-sm text-gray-400 bg-gray-800/30 rounded p-2">
+                      {informationUnitsSummary.consistency.updateRationale}
+                    </p>
+                  )}
+                </div>
+              )}
+
+              {/* Comparison Stats */}
+              {informationUnitsSummary.comparisonStats && (
+                <div className="border-t border-gray-800 pt-4">
+                  <h4 className="text-sm font-medium text-gray-400 mb-2">Cross-Validation Stats</h4>
+                  <div className="grid grid-cols-4 gap-3 text-center">
+                    <div>
+                      <div className="text-lg font-bold text-gray-300">
+                        {informationUnitsSummary.comparisonStats.totalComparisons}
+                      </div>
+                      <div className="text-xs text-gray-500">Comparisons</div>
+                    </div>
+                    <div>
+                      <div className="text-lg font-bold text-green-400">
+                        {informationUnitsSummary.comparisonStats.agreements}
+                      </div>
+                      <div className="text-xs text-gray-500">Agreements</div>
+                    </div>
+                    <div>
+                      <div className="text-lg font-bold text-red-400">
+                        {informationUnitsSummary.comparisonStats.contradictions}
+                      </div>
+                      <div className="text-xs text-gray-500">Contradictions</div>
+                    </div>
+                    <div>
+                      <div className="text-lg font-bold text-blue-400">
+                        {(informationUnitsSummary.comparisonStats.avgAgreementScore * 100).toFixed(0)}%
+                      </div>
+                      <div className="text-xs text-gray-500">Avg Agreement</div>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Evidence Cards */}
       {verifications.map((verification) => {

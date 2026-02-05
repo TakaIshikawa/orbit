@@ -21,6 +21,7 @@ import {
   VerificationRepository,
   FeedbackEventRepository,
   SystemLearningRepository,
+  InformationUnitRepository,
   type ManagedSourceRow,
   type IssueRow,
   type PatternRow,
@@ -31,6 +32,7 @@ import { eventBus } from "../events/index.js";
 import { SourceFetcherRegistry, type FetchedContent, type FetchedItem } from "./source-fetchers/index.js";
 import { getBayesianScoringService } from "./bayesian-scoring.js";
 import { EpistemologicalValidationService } from "./epistemological-validation.js";
+import { getInformationDecompositionService, type DecomposedUnit } from "./information-decomposition.js";
 
 // ============================================================================
 // Types
@@ -47,6 +49,7 @@ interface DiscoveryContext {
   maxIssues: number;
   minSourceCredibility: number;
   enableEpistemologicalValidation?: boolean; // Run causal analysis, adversarial validation, and predictions
+  enableInformationDecomposition?: boolean; // Decompose content into granularity-aware units
 }
 
 interface ExtractedClaim {
@@ -317,6 +320,31 @@ export class EnhancedDiscoveryExecutor {
         await executionRepo.appendLog(executionId, "info", "Epistemological validation complete", 3);
       }
 
+      // Step 4.6: Information decomposition (granularity-aware units)
+      // Auto-run for high-score issues or if explicitly enabled
+      let decompositionStats = { totalUnits: 0, comparisons: 0, contradictions: 0 };
+      const shouldDecompose = context?.enableInformationDecomposition || highScoreIssueIds.length > 0;
+
+      if (shouldDecompose && savedIssues.length > 0) {
+        await executionRepo.appendLog(
+          executionId,
+          "info",
+          `Step 4.6: Decomposing content into granularity-aware information units...`,
+          3
+        );
+        decompositionStats = await this.decomposeAndCrossValidate(
+          fetchedContent,
+          savedIssues,
+          sourcesUsed
+        );
+        await executionRepo.appendLog(
+          executionId,
+          "info",
+          `Decomposition complete: ${decompositionStats.totalUnits} units, ${decompositionStats.comparisons} comparisons, ${decompositionStats.contradictions} contradictions`,
+          3
+        );
+      }
+
       // Step 5: Generate solutions
       await executionRepo.appendLog(executionId, "info", "Step 5: Generating solutions...", 4);
       const solutionIds = await this.generateAndSaveSolutions(savedIssues, context);
@@ -337,6 +365,7 @@ export class EnhancedDiscoveryExecutor {
           verificationsCreated: verificationIds,
           solutionsCreated: solutionIds,
           deduplicatedPatterns: deduplicatedCount,
+          decomposition: decompositionStats,
         },
       });
 
@@ -1299,6 +1328,294 @@ Respond in JSON:
         // Don't fail the whole process if validation fails
       }
     }
+  }
+
+  // ============================================================================
+  // Information Decomposition & Cross-Validation
+  // ============================================================================
+
+  /**
+   * Decompose content into granularity-aware information units and cross-validate
+   */
+  private async decomposeAndCrossValidate(
+    fetchedContent: FetchedContent[],
+    issues: IssueRow[],
+    sourcesUsed: Array<{ id: string; name: string; url: string; credibility: number; itemCount: number }>
+  ): Promise<{ totalUnits: number; comparisons: number; contradictions: number }> {
+    const db = getDatabase();
+    const unitRepo = new InformationUnitRepository(db);
+    const decompositionService = getInformationDecompositionService();
+
+    const credibilityMap = new Map(sourcesUsed.map((s) => [s.id, s.credibility]));
+    let totalUnits = 0;
+    let comparisons = 0;
+    let contradictions = 0;
+
+    // Map issues to their linked patterns for domain context
+    const issueIds = new Set(issues.map((i) => i.id));
+
+    // Step 1: Decompose each source item into information units
+    for (const content of fetchedContent) {
+      const sourceCredibility = credibilityMap.get(content.sourceId) || content.credibility;
+
+      for (const item of content.items.slice(0, 5)) { // Limit to top 5 items per source
+        try {
+          // Determine content type for source authority weighting
+          const contentType = this.classifyContentType(item, content.sourceName);
+
+          // Decompose into units
+          const units = await decompositionService.decomposeItem(item, sourceCredibility, contentType);
+
+          if (units.length === 0) continue;
+
+          // Find the most relevant issue for this content
+          const relevantIssue = this.findRelevantIssue(item, issues);
+
+          // Save units
+          const savedUnits = await unitRepo.createMany(
+            units.map((unit) => ({
+              sourceId: content.sourceId,
+              sourceName: content.sourceName,
+              sourceUrl: content.sourceUrl,
+              itemUrl: item.url,
+              itemTitle: item.title,
+              excerpt: unit.excerpt,
+              granularityLevel: unit.granularityLevel,
+              granularityConfidence: unit.granularityConfidence,
+              statement: unit.statement,
+              temporalScope: unit.temporalScope,
+              temporalSpecifics: unit.temporalSpecifics || null,
+              spatialScope: unit.spatialScope,
+              spatialSpecifics: unit.spatialSpecifics || null,
+              domains: unit.domains,
+              concepts: unit.concepts,
+              measurability: unit.measurability,
+              quantitativeData: unit.quantitativeData || null,
+              falsifiabilityScore: unit.falsifiabilityScore,
+              falsifiabilityCriteria: unit.falsifiabilityCriteria,
+              priorConfidence: 0.5,
+              currentConfidence: 0.5,
+              sourceAuthorityForLevel: unit.sourceAuthorityForLevel,
+              issueId: relevantIssue?.id || null,
+            }))
+          );
+
+          totalUnits += savedUnits.length;
+          console.log(`[Decomposition] Extracted ${savedUnits.length} units from "${item.title.slice(0, 50)}..."`);
+
+        } catch (error) {
+          console.error(`[Decomposition] Failed to decompose item "${item.title}":`, error);
+        }
+      }
+    }
+
+    // Step 2: Cross-validate units at the same granularity level
+    console.log(`[Decomposition] Cross-validating ${totalUnits} units...`);
+
+    // Get all units we just created, grouped by granularity level
+    const levels = ["data_point", "observation", "statistical", "causal_claim"]; // Focus on falsifiable levels
+
+    for (const level of levels) {
+      const unitsAtLevel = await unitRepo.findByGranularityLevel(level, { limit: 50 });
+
+      if (unitsAtLevel.length < 2) continue;
+
+      // Compare units with sufficient comparability
+      for (let i = 0; i < Math.min(unitsAtLevel.length, 20); i++) {
+        const unitA = unitsAtLevel[i];
+        const comparableUnits = await unitRepo.findComparableUnits(unitA, { limit: 5, minConceptOverlap: 0.2 });
+
+        for (const unitB of comparableUnits) {
+          try {
+            // Convert to DecomposedUnit format for comparison
+            const unitADecomposed = this.toDecomposedUnit(unitA);
+            const unitBDecomposed = this.toDecomposedUnit(unitB);
+
+            const result = await decompositionService.compareUnits(unitADecomposed, unitBDecomposed);
+
+            // Save comparison
+            await unitRepo.createComparison({
+              unitAId: unitA.id,
+              unitBId: unitB.id,
+              granularityLevel: level as "data_point" | "observation" | "statistical" | "causal_claim" | "mechanism" | "theory" | "paradigm",
+              comparabilityScore: result.comparabilityScore,
+              comparabilityFactors: result.comparabilityFactors,
+              relationship: result.relationship,
+              agreementScore: result.agreementScore,
+              contradictionType: result.contradictionType || null,
+              contradictionAnalysis: result.contradictionAnalysis || null,
+              netConfidenceImpact: result.netConfidenceImpact,
+              impactExplanation: result.impactExplanation,
+            });
+
+            comparisons++;
+            if (result.relationship === "contradicts") {
+              contradictions++;
+              console.log(`[Decomposition] Contradiction found at ${level}: "${unitA.statement.slice(0, 50)}..." vs "${unitB.statement.slice(0, 50)}..."`);
+            }
+
+            // Apply Bayesian update to unit confidences
+            if (result.netConfidenceImpact !== 0) {
+              await unitRepo.updateConfidence(
+                unitA.id,
+                Math.max(0, Math.min(1, unitA.currentConfidence + result.netConfidenceImpact))
+              );
+              await unitRepo.updateConfidence(
+                unitB.id,
+                Math.max(0, Math.min(1, unitB.currentConfidence + result.netConfidenceImpact))
+              );
+            }
+          } catch (error) {
+            console.error(`[Decomposition] Comparison failed:`, error);
+          }
+        }
+      }
+    }
+
+    // Step 3: Update issue consistency based on supporting units
+    for (const issue of issues) {
+      try {
+        const unitCountsByLevel = await unitRepo.getUnitCountsByLevel(issue.id);
+        const confidenceByLevel = await unitRepo.getConfidenceByLevel(issue.id);
+        const comparisonStats = await unitRepo.getComparisonStats(issue.id);
+
+        const totalUnitCount = Object.values(unitCountsByLevel).reduce((a, b) => a + b, 0);
+        if (totalUnitCount === 0) continue;
+
+        // Compute weighted consistency (weight by falsifiability)
+        const FALSIFIABILITY_WEIGHTS: Record<string, number> = {
+          paradigm: 0.1, theory: 0.3, mechanism: 0.5, causal_claim: 0.6,
+          statistical: 0.8, observation: 0.9, data_point: 0.95,
+        };
+
+        let weightedSum = 0;
+        let totalWeight = 0;
+        for (const [level, count] of Object.entries(unitCountsByLevel)) {
+          const weight = FALSIFIABILITY_WEIGHTS[level] || 0.5;
+          const confidence = confidenceByLevel[level] || 0.5;
+          weightedSum += weight * confidence * count;
+          totalWeight += weight * count;
+        }
+
+        const weightedConsistency = totalWeight > 0 ? weightedSum / totalWeight : 0.5;
+        const overallConsistency = comparisonStats.totalComparisons > 0
+          ? (comparisonStats.agreements / comparisonStats.totalComparisons)
+          : 0.5;
+
+        await unitRepo.upsertConsistency("issue", issue.id, {
+          supportByLevel: Object.fromEntries(
+            Object.entries(unitCountsByLevel).map(([level, count]) => [
+              level,
+              {
+                unitCount: count,
+                sourceCount: 1, // TODO: count unique sources
+                avgConfidence: confidenceByLevel[level] || 0.5,
+                agreementRate: overallConsistency,
+                contradictionCount: comparisonStats.contradictions,
+              },
+            ])
+          ),
+          overallConsistency,
+          weightedConsistency,
+        });
+
+        console.log(`[Decomposition] Issue ${issue.id} consistency: ${(weightedConsistency * 100).toFixed(1)}% (${totalUnitCount} units)`);
+      } catch (error) {
+        console.error(`[Decomposition] Failed to update consistency for issue ${issue.id}:`, error);
+      }
+    }
+
+    return { totalUnits, comparisons, contradictions };
+  }
+
+  private classifyContentType(item: FetchedItem, sourceName: string): "foundational" | "current" | "research" {
+    const lowerSource = sourceName.toLowerCase();
+    const lowerTitle = item.title.toLowerCase();
+
+    // Research sources
+    if (lowerSource.includes("arxiv") || lowerSource.includes("pubmed") ||
+        lowerSource.includes("nature") || lowerSource.includes("science")) {
+      return "research";
+    }
+
+    // Foundational (topic pages, methodology, definitions)
+    if (lowerTitle.includes("introduction") || lowerTitle.includes("overview") ||
+        lowerTitle.includes("methodology") || lowerTitle.includes("definition")) {
+      return "foundational";
+    }
+
+    // Default to current (news, blogs, recent articles)
+    return "current";
+  }
+
+  private findRelevantIssue(item: FetchedItem, issues: IssueRow[]): IssueRow | null {
+    if (issues.length === 0) return null;
+
+    const itemText = `${item.title} ${item.summary || item.content}`.toLowerCase();
+
+    // Score each issue by domain/concept overlap
+    let bestMatch: IssueRow | null = null;
+    let bestScore = 0;
+
+    for (const issue of issues) {
+      let score = 0;
+      for (const domain of issue.affectedDomains) {
+        if (itemText.includes(domain.toLowerCase())) score += 2;
+      }
+      for (const cause of issue.rootCauses) {
+        const causeWords = cause.toLowerCase().split(/\s+/);
+        for (const word of causeWords) {
+          if (word.length > 4 && itemText.includes(word)) score += 1;
+        }
+      }
+
+      if (score > bestScore) {
+        bestScore = score;
+        bestMatch = issue;
+      }
+    }
+
+    return bestScore >= 2 ? bestMatch : issues[0]; // Fall back to first issue
+  }
+
+  private toDecomposedUnit(row: {
+    statement: string;
+    granularityLevel: string;
+    granularityConfidence: number;
+    temporalScope: string;
+    temporalSpecifics: unknown;
+    spatialScope: string;
+    spatialSpecifics: unknown;
+    domains: unknown;
+    concepts: unknown;
+    measurability: string;
+    quantitativeData: unknown;
+    falsifiabilityScore: number;
+    falsifiabilityCriteria: unknown;
+    excerpt: string;
+    sourceAuthorityForLevel: number;
+  }): DecomposedUnit {
+    return {
+      statement: row.statement,
+      granularityLevel: row.granularityLevel as DecomposedUnit["granularityLevel"],
+      granularityConfidence: row.granularityConfidence,
+      temporalScope: row.temporalScope as DecomposedUnit["temporalScope"],
+      temporalSpecifics: row.temporalSpecifics as DecomposedUnit["temporalSpecifics"],
+      spatialScope: row.spatialScope as DecomposedUnit["spatialScope"],
+      spatialSpecifics: row.spatialSpecifics as DecomposedUnit["spatialSpecifics"],
+      domains: (row.domains as string[]) || [],
+      concepts: (row.concepts as string[]) || [],
+      measurability: row.measurability as DecomposedUnit["measurability"],
+      quantitativeData: row.quantitativeData as DecomposedUnit["quantitativeData"],
+      falsifiabilityScore: row.falsifiabilityScore,
+      falsifiabilityCriteria: (row.falsifiabilityCriteria as DecomposedUnit["falsifiabilityCriteria"]) || {
+        testableConditions: [],
+        observableIndicators: [],
+        timeframeForTest: "Unknown",
+      },
+      excerpt: row.excerpt,
+      sourceAuthorityForLevel: row.sourceAuthorityForLevel,
+    };
   }
 
   // ============================================================================

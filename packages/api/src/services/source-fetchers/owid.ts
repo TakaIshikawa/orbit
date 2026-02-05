@@ -32,6 +32,8 @@ interface OWIDArticle {
   url: string;
   slug: string;
   excerpt?: string;
+  published?: Date | null;
+  authors?: string[];
 }
 
 export class OWIDFetcher implements SourceFetcher {
@@ -54,26 +56,42 @@ export class OWIDFetcher implements SourceFetcher {
     },
     options: FetchOptions
   ): Promise<FetchedContent> {
-    // Get relevant topics based on domains and keywords
+    const items: FetchedItem[] = [];
     const topics = this.getRelevantTopics(options.domains, options.keywords);
 
-    // Fetch articles matching topics
-    const articles = await this.fetchArticles(topics, options.maxItems);
+    // 1. Fetch RECENT articles from Atom feed - prioritize these
+    console.log(`[OWID] Fetching recent articles from Atom feed...`);
+    const latestArticles = await this.fetchLatestArticles(topics, options.maxItems);
 
-    // Fetch content for each article
-    const items: FetchedItem[] = [];
-    for (const article of articles.slice(0, options.maxItems)) {
+    for (const article of latestArticles) {
       try {
-        const content = await this.fetchArticleContent(article);
+        const content = await this.fetchArticleContent(article, 'current');
         if (content) {
           items.push(content);
         }
       } catch (error) {
-        console.error(`[OWID] Failed to fetch article ${article.url}:`, error);
+        console.error(`[OWID] Failed to fetch latest article ${article.url}:`, error);
       }
+      await new Promise((resolve) => setTimeout(resolve, 300));
+    }
 
-      // Rate limiting - be polite
-      await new Promise((resolve) => setTimeout(resolve, 500));
+    console.log(`[OWID] Fetched ${items.length} recent articles`);
+
+    // 2. Only fetch foundational pages if we got very few recent articles
+    if (items.length < 2) {
+      console.log(`[OWID] Few recent articles found, adding foundational pages...`);
+      const topicArticles = await this.fetchTopicArticles(topics, Math.max(2, options.maxItems - items.length));
+      for (const article of topicArticles) {
+        try {
+          const content = await this.fetchArticleContent(article, 'foundational');
+          if (content) {
+            items.push(content);
+          }
+        } catch (error) {
+          console.error(`[OWID] Failed to fetch topic article ${article.url}:`, error);
+        }
+        await new Promise((resolve) => setTimeout(resolve, 300));
+      }
     }
 
     return {
@@ -84,6 +102,116 @@ export class OWIDFetcher implements SourceFetcher {
       fetchedAt: new Date(),
       credibility: source.credibility,
     };
+  }
+
+  private async fetchLatestArticles(topics: string[], maxItems: number): Promise<OWIDArticle[]> {
+    const articles: OWIDArticle[] = [];
+
+    try {
+      // Fetch the Atom feed - much more reliable than HTML scraping
+      console.log(`[OWID] Fetching Atom feed for latest articles...`);
+      const response = await fetch('https://ourworldindata.org/atom.xml', {
+        headers: { 'User-Agent': 'Orbit-Discovery/1.0 (Research Tool)' },
+      });
+
+      if (!response.ok) {
+        console.error(`[OWID] Failed to fetch Atom feed: ${response.status}`);
+        return [];
+      }
+
+      const xml = await response.text();
+
+      // Parse Atom feed entries
+      const entryRegex = /<entry>([\s\S]*?)<\/entry>/gi;
+      let match;
+
+      while ((match = entryRegex.exec(xml)) !== null) {
+        const entry = match[1];
+
+        // Extract title
+        const titleMatch = entry.match(/<title><!\[CDATA\[([\s\S]*?)\]\]><\/title>/i) ||
+                          entry.match(/<title>([\s\S]*?)<\/title>/i);
+        const title = titleMatch ? titleMatch[1].trim() : '';
+
+        // Extract URL
+        const linkMatch = entry.match(/<link[^>]*href="([^"]+)"[^>]*\/?>/) ||
+                         entry.match(/<id>(https:\/\/ourworldindata\.org\/[^<]+)<\/id>/i);
+        const url = linkMatch ? linkMatch[1] : '';
+
+        // Extract published date
+        const publishedMatch = entry.match(/<published>([^<]+)<\/published>/i);
+        const published = publishedMatch ? new Date(publishedMatch[1]) : null;
+
+        // Extract summary
+        const summaryMatch = entry.match(/<summary><!\[CDATA\[([\s\S]*?)\]\]><\/summary>/i) ||
+                            entry.match(/<summary>([\s\S]*?)<\/summary>/i);
+        let excerpt = summaryMatch ? summaryMatch[1] : '';
+        // Clean HTML from excerpt
+        excerpt = excerpt.replace(/<[^>]*>/g, '').replace(/&[^;]+;/g, ' ').trim();
+
+        // Extract authors
+        const authorMatches = entry.matchAll(/<author><name>([^<]+)<\/name><\/author>/gi);
+        const authors = Array.from(authorMatches).map(m => m[1]);
+
+        if (title && url && url.includes('ourworldindata.org')) {
+          const slug = url.replace('https://ourworldindata.org/', '');
+          articles.push({
+            title,
+            url,
+            slug,
+            excerpt,
+            published,
+            authors,
+          });
+        }
+      }
+
+      console.log(`[OWID] Parsed ${articles.length} articles from Atom feed`);
+
+      // Score articles by topic relevance (but don't exclude non-matches)
+      const scored = articles.map((article) => {
+        const articleText = `${article.slug} ${article.title} ${article.excerpt || ''}`.toLowerCase();
+        let score = 0;
+
+        for (const topic of topics) {
+          const topicLower = topic.toLowerCase();
+          // Exact word match
+          if (articleText.includes(topicLower)) {
+            score += 2;
+          }
+          // Partial match (e.g., "climate" matches "climate-change")
+          const topicWords = topicLower.split(/[-_\s]+/);
+          for (const word of topicWords) {
+            if (word.length > 3 && articleText.includes(word)) {
+              score += 1;
+            }
+          }
+        }
+
+        return { article, score };
+      });
+
+      // Sort by score (highest first), then by date (most recent first)
+      scored.sort((a, b) => {
+        if (b.score !== a.score) return b.score - a.score;
+        // Both have same score, prefer more recent
+        const dateA = a.article.published?.getTime() || 0;
+        const dateB = b.article.published?.getTime() || 0;
+        return dateB - dateA;
+      });
+
+      // Take top articles - include some non-matching recent ones if needed
+      const topRelevant = scored.filter(s => s.score > 0).slice(0, Math.ceil(maxItems * 0.7));
+      const recentFiller = scored.filter(s => s.score === 0).slice(0, Math.ceil(maxItems * 0.3));
+      const result = [...topRelevant.map(s => s.article), ...recentFiller.map(s => s.article)].slice(0, maxItems);
+
+      console.log(`[OWID] Found ${topRelevant.length} topic-relevant + ${recentFiller.length} recent articles`);
+      return result;
+
+    } catch (error) {
+      console.error('[OWID] Error fetching Atom feed:', error);
+      return [];
+    }
   }
 
   private getRelevantTopics(domains: string[], keywords: string[]): string[] {
@@ -108,12 +236,11 @@ export class OWIDFetcher implements SourceFetcher {
     return Array.from(topics);
   }
 
-  private async fetchArticles(topics: string[], maxItems: number): Promise<OWIDArticle[]> {
-    // OWID has a well-structured URL pattern for articles
-    // We'll construct URLs based on known topic patterns
+  private async fetchTopicArticles(topics: string[], maxItems: number): Promise<OWIDArticle[]> {
+    // Foundational topic pages - domain grounding
     const articles: OWIDArticle[] = [];
 
-    // Known OWID article patterns for common topics
+    // Known OWID topic pages for common domains
     const knownArticles: OWIDArticle[] = [
       // Climate
       { title: 'CO2 and Greenhouse Gas Emissions', url: 'https://ourworldindata.org/co2-and-greenhouse-gas-emissions', slug: 'co2-and-greenhouse-gas-emissions' },
@@ -164,9 +291,12 @@ export class OWIDFetcher implements SourceFetcher {
     return articles.slice(0, maxItems);
   }
 
-  private async fetchArticleContent(article: OWIDArticle): Promise<FetchedItem | null> {
+  private async fetchArticleContent(
+    article: OWIDArticle,
+    granularity: 'current' | 'foundational' = 'current'
+  ): Promise<FetchedItem | null> {
     try {
-      console.log(`[OWID] Fetching: ${article.url}`);
+      console.log(`[OWID] Fetching (${granularity}): ${article.url}`);
 
       const response = await fetch(article.url, {
         headers: {
@@ -175,6 +305,27 @@ export class OWIDFetcher implements SourceFetcher {
       });
 
       if (!response.ok) {
+        // If we can't fetch the page but have feed data, use that
+        if (article.excerpt) {
+          return {
+            id: article.slug,
+            title: article.title,
+            summary: article.excerpt,
+            content: article.excerpt,
+            url: article.url,
+            publishedAt: article.published || null,
+            authors: article.authors || ['Our World in Data'],
+            categories: article.slug.split('-'),
+            metadata: {
+              source: 'ourworldindata.org',
+              dataAvailable: true,
+              license: 'CC-BY',
+              granularity,
+              weight: granularity === 'current' ? 1.0 : 0.6,
+              fromFeedOnly: true,
+            },
+          };
+        }
         return null;
       }
 
@@ -182,7 +333,7 @@ export class OWIDFetcher implements SourceFetcher {
 
       // Extract key information from the HTML
       const title = this.extractMetaContent(html, 'og:title') || article.title;
-      const description = this.extractMetaContent(html, 'og:description') || '';
+      const description = this.extractMetaContent(html, 'og:description') || article.excerpt || '';
       const publishedTime = this.extractMetaContent(html, 'article:published_time');
 
       // Extract article excerpt/summary
@@ -204,17 +355,40 @@ export class OWIDFetcher implements SourceFetcher {
         summary: description,
         content: content || description,
         url: article.url,
-        publishedAt: publishedTime ? new Date(publishedTime) : null,
-        authors: ['Our World in Data'],
+        publishedAt: publishedTime ? new Date(publishedTime) : article.published || null,
+        authors: article.authors || ['Our World in Data'],
         categories: article.slug.split('-'),
         metadata: {
           source: 'ourworldindata.org',
           dataAvailable: true,
           license: 'CC-BY',
+          granularity, // 'current' = recent articles, 'foundational' = topic pages
+          weight: granularity === 'current' ? 1.0 : 0.6, // Current trends weighted higher
         },
       };
     } catch (error) {
       console.error(`[OWID] Error fetching ${article.url}:`, error);
+      // Fallback to feed data if available
+      if (article.excerpt) {
+        return {
+          id: article.slug,
+          title: article.title,
+          summary: article.excerpt,
+          content: article.excerpt,
+          url: article.url,
+          publishedAt: article.published || null,
+          authors: article.authors || ['Our World in Data'],
+          categories: article.slug.split('-'),
+          metadata: {
+            source: 'ourworldindata.org',
+            dataAvailable: true,
+            license: 'CC-BY',
+            granularity,
+            weight: granularity === 'current' ? 1.0 : 0.6,
+            fromFeedOnly: true,
+          },
+        };
+      }
       return null;
     }
   }

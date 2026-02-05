@@ -36,6 +36,7 @@ import { sourcesRoutes } from "./routes/sources.js";
 import { pipelineRoutes } from "./routes/pipeline.js";
 import { dashboardRoutes } from "./routes/dashboard.js";
 import { discoveryRoutes } from "./routes/discovery.js";
+import { validationRoutes } from "./routes/validation.js";
 import { setupWebSocket } from "./events/index.js";
 import { startEnhancedDiscoveryExecutor } from "./services/enhanced-discovery-executor.js";
 
@@ -64,6 +65,7 @@ app.route("/sources", sourcesRoutes);
 app.route("/pipeline", pipelineRoutes);
 app.route("/dashboard", dashboardRoutes);
 app.route("/discovery", discoveryRoutes);
+app.route("/validation", validationRoutes);
 
 // 404 handler
 app.notFound((c) => {

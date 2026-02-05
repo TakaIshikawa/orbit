@@ -18,6 +18,9 @@ export * from "./managed-sources.js";
 export * from "./discovery-profiles.js";
 export * from "./reference-classes.js";
 export * from "./bayesian-updates.js";
+export * from "./causal-claims.js";
+export * from "./adversarial-validations.js";
+export * from "./predictions.js";
 
 // Re-export types for convenience
 export type { PatternRow, NewPatternRow } from "../schema/patterns.js";
@@ -41,3 +44,6 @@ export type { DiscoveryProfileRow, NewDiscoveryProfileRow } from "../schema/disc
 export type { ReferenceClassRow, NewReferenceClassRow } from "../schema/reference-classes.js";
 export type { BayesianUpdateRow, NewBayesianUpdateRow } from "../schema/bayesian-updates.js";
 export type { BayesianScores, ExpectedValueQueryOptions } from "./issues.js";
+export type { CausalClaimRow, NewCausalClaimRow, CausalChainRow, NewCausalChainRow } from "../schema/causal-claims.js";
+export type { AdversarialValidationRow, NewAdversarialValidationRow, ValidationSessionRow, NewValidationSessionRow } from "../schema/adversarial-validations.js";
+export type { PredictionRow, NewPredictionRow, CalibrationRecordRow, NewCalibrationRecordRow, PredictionSetRow, NewPredictionSetRow } from "../schema/predictions.js";

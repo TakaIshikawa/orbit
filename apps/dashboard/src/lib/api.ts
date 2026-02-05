@@ -58,6 +58,15 @@ export interface Issue {
   simpleStatus?: SimpleStatus | null;
   // Core fields
   patternIds: string[];
+  sources: Array<{
+    sourceId: string;
+    sourceName: string;
+    sourceUrl: string;
+    itemTitle: string;
+    itemUrl: string;
+    excerpt?: string;
+    credibility?: number;
+  }>;
   affectedDomains: string[];
   rootCauses: string[];
   leveragePoints: string[];
@@ -1773,11 +1782,250 @@ Object.assign(ApiClient.prototype, {
     const query = searchParams.toString();
     return (this as unknown as { request: ApiClient["request"] }).request(`/sources/managed/${id}/history${query ? `?${query}` : ""}`);
   },
+
+  // Validation (Epistemological) methods
+  async getCausalClaims(this: ApiClient, issueId: string): Promise<{ data: CausalClaim[] }> {
+    return (this as unknown as { request: ApiClient["request"] }).request(`/validation/issues/${issueId}/causal-claims`);
+  },
+
+  async getCausalChains(this: ApiClient, issueId: string): Promise<{ data: CausalChain[] }> {
+    return (this as unknown as { request: ApiClient["request"] }).request(`/validation/issues/${issueId}/causal-chains`);
+  },
+
+  async getChallenges(this: ApiClient, issueId: string): Promise<{ data: AdversarialChallenge[] }> {
+    return (this as unknown as { request: ApiClient["request"] }).request(`/validation/issues/${issueId}/challenges`);
+  },
+
+  async getPendingChallenges(this: ApiClient, issueId: string): Promise<{ data: AdversarialChallenge[] }> {
+    return (this as unknown as { request: ApiClient["request"] }).request(`/validation/issues/${issueId}/challenges/pending`);
+  },
+
+  async resolveChallenge(this: ApiClient, challengeId: string, data: {
+    resolution: "resolved" | "partially_resolved" | "unresolved" | "accepted";
+    resolutionNotes: string;
+    resolutionEvidence?: Array<{ sourceUrl?: string; sourceName?: string; excerpt: string }>;
+    confidenceImpact?: number;
+    claimModified?: string;
+  }): Promise<{ data: AdversarialChallenge }> {
+    return (this as unknown as { request: ApiClient["request"] }).request(`/validation/challenges/${challengeId}/resolve`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  },
+
+  async getChallengeStats(this: ApiClient, issueId: string): Promise<{ data: ChallengeStats }> {
+    return (this as unknown as { request: ApiClient["request"] }).request(`/validation/issues/${issueId}/challenges/stats`);
+  },
+
+  async getPredictions(this: ApiClient, issueId: string): Promise<{ data: Prediction[] }> {
+    return (this as unknown as { request: ApiClient["request"] }).request(`/validation/issues/${issueId}/predictions`);
+  },
+
+  async getActivePredictions(this: ApiClient, limit?: number): Promise<{ data: Prediction[] }> {
+    const searchParams = new URLSearchParams();
+    if (limit) searchParams.set("limit", limit.toString());
+    const query = searchParams.toString();
+    return (this as unknown as { request: ApiClient["request"] }).request(`/validation/predictions/active${query ? `?${query}` : ""}`);
+  },
+
+  async getPredictionsDueSoon(this: ApiClient, days?: number): Promise<{ data: Prediction[] }> {
+    const searchParams = new URLSearchParams();
+    if (days) searchParams.set("days", days.toString());
+    const query = searchParams.toString();
+    return (this as unknown as { request: ApiClient["request"] }).request(`/validation/predictions/due-soon${query ? `?${query}` : ""}`);
+  },
+
+  async resolvePrediction(this: ApiClient, predictionId: string, data: {
+    status: "resolved_correct" | "resolved_incorrect" | "resolved_partial" | "expired" | "withdrawn";
+    actualOutcome: string;
+    actualValue?: number;
+    outcomeSource?: string;
+    postMortem?: string;
+  }): Promise<{ data: Prediction }> {
+    return (this as unknown as { request: ApiClient["request"] }).request(`/validation/predictions/${predictionId}/resolve`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  },
+
+  async getValidationSummary(this: ApiClient, issueId: string): Promise<{ data: ValidationSummary }> {
+    return (this as unknown as { request: ApiClient["request"] }).request(`/validation/issues/${issueId}/summary`);
+  },
+
+  async triggerValidation(this: ApiClient, issueId: string): Promise<{ data: { validationScore: number; causalClaimsCount: number; challengesCount: number; predictionsCount: number; adversarialResult: string } }> {
+    return (this as unknown as { request: ApiClient["request"] }).request(`/validation/issues/${issueId}/validate`, {
+      method: "POST",
+    });
+  },
 });
+
+// =============================================================================
+// Validation Types (Epistemological)
+// =============================================================================
+
+export interface CausalClaim {
+  id: string;
+  createdAt: string;
+  updatedAt: string;
+  issueId: string | null;
+  cause: string;
+  effect: string;
+  mechanism: string | null;
+  direction: "forward" | "reverse" | "bidirectional" | "spurious" | "unknown";
+  confidence: number;
+  evidenceStrength: "experimental" | "quasi_experimental" | "longitudinal" | "cross_sectional" | "case_control" | "observational" | "expert_consensus" | "anecdotal" | "theoretical";
+  evidenceSources: Array<{
+    sourceUrl: string;
+    sourceName: string;
+    studyType?: string;
+    sampleSize?: number;
+    effectSize?: number;
+    pValue?: number;
+    yearPublished?: number;
+    peerReviewed: boolean;
+    excerpt: string;
+    relevance: "high" | "medium" | "low";
+  }>;
+  counterfactualStatus: "not_assessed" | "assessed_supported" | "assessed_weakened" | "assessed_refuted";
+  counterfactualAnalysis: {
+    question: string;
+    assessment: string;
+    alternativeExplanations: Array<{ explanation: string; plausibility: number; refutation?: string }>;
+    confounders: Array<{ variable: string; controlled: boolean; impact: "high" | "medium" | "low" }>;
+    assessedAt: string;
+    assessedBy: string;
+  } | null;
+  hillCriteria: {
+    strength: { score: number; notes: string };
+    consistency: { score: number; notes: string };
+    specificity: { score: number; notes: string };
+    temporality: { score: number; notes: string };
+    gradient: { score: number; notes: string };
+    plausibility: { score: number; notes: string };
+    coherence: { score: number; notes: string };
+    experiment: { score: number; notes: string };
+    analogy: { score: number; notes: string };
+    overallScore: number;
+    assessedAt: string;
+  } | null;
+  evidenceScore: number | null;
+}
+
+export interface CausalChain {
+  id: string;
+  createdAt: string;
+  issueId: string | null;
+  name: string;
+  description: string | null;
+  claimIds: string[];
+  weakestLinkId: string | null;
+  overallConfidence: number | null;
+  hasGaps: boolean;
+  gapDescription: string | null;
+  isPrimary: boolean;
+}
+
+export interface AdversarialChallenge {
+  id: string;
+  createdAt: string;
+  updatedAt: string;
+  entityType: string;
+  entityId: string;
+  challengeType: "framing_challenge" | "evidence_challenge" | "causation_challenge" | "scope_challenge" | "stakeholder_challenge" | "alternative_challenge" | "feasibility_challenge" | "unintended_effects" | "base_rate_challenge" | "selection_bias";
+  severity: "critical" | "major" | "moderate" | "minor";
+  challengeStatement: string;
+  challengeReasoning: string;
+  challengeEvidence: Array<{ sourceUrl?: string; sourceName?: string; excerpt: string; relevance: "high" | "medium" | "low" }> | null;
+  alternativeProposal: string | null;
+  resolution: "pending" | "resolved" | "partially_resolved" | "unresolved" | "accepted";
+  resolutionNotes: string | null;
+  resolutionEvidence: Array<{ sourceUrl?: string; sourceName?: string; excerpt: string }> | null;
+  resolvedAt: string | null;
+  resolvedBy: string | null;
+  confidenceImpact: number | null;
+  claimModified: string | null;
+  challengedBy: string;
+  validationRound: string | null;
+}
+
+export interface Prediction {
+  id: string;
+  createdAt: string;
+  updatedAt: string;
+  issueId: string | null;
+  predictionType: "trend_direction" | "threshold_crossing" | "event_occurrence" | "comparative" | "timing" | "magnitude" | "conditional";
+  predictionStatement: string;
+  operationalization: {
+    metric?: string;
+    threshold?: number;
+    comparisonValue?: number;
+    dataSource?: string;
+    measurementMethod: string;
+  };
+  probability: number;
+  confidenceInterval: { lower: number; upper: number; confidence: number } | null;
+  reasoning: string;
+  keyAssumptions: string[];
+  basedOnClaimIds: string[];
+  predictionMadeAt: string;
+  resolutionDeadline: string;
+  status: "active" | "resolved_correct" | "resolved_incorrect" | "resolved_partial" | "expired" | "withdrawn";
+  resolvedAt: string | null;
+  actualOutcome: string | null;
+  actualValue: number | null;
+  outcomeSource: string | null;
+  brierScore: number | null;
+  logScore: number | null;
+  postMortem: string | null;
+  modelUpdates: Array<{ claimId: string; previousConfidence: number; newConfidence: number; reason: string }> | null;
+}
+
+export interface ValidationSummary {
+  isValidated: boolean;
+  validationScore: number | null;
+  causalClaimCount: number;
+  challengeCount: number;
+  unresolvedChallenges: number;
+  predictionCount: number;
+  activePredictions: number;
+  lastValidatedAt: string | null;
+}
+
+export interface ChallengeStats {
+  total: number;
+  bySeverity: Record<string, number>;
+  byResolution: Record<string, number>;
+  avgConfidenceImpact: number;
+}
 
 // Type augmentation for ApiClient
 declare module "@/lib/api" {
   interface ApiClient {
+    // Validation methods
+    getCausalClaims(issueId: string): Promise<{ data: CausalClaim[] }>;
+    getCausalChains(issueId: string): Promise<{ data: CausalChain[] }>;
+    getChallenges(issueId: string): Promise<{ data: AdversarialChallenge[] }>;
+    getPendingChallenges(issueId: string): Promise<{ data: AdversarialChallenge[] }>;
+    resolveChallenge(challengeId: string, data: {
+      resolution: "resolved" | "partially_resolved" | "unresolved" | "accepted";
+      resolutionNotes: string;
+      resolutionEvidence?: Array<{ sourceUrl?: string; sourceName?: string; excerpt: string }>;
+      confidenceImpact?: number;
+      claimModified?: string;
+    }): Promise<{ data: AdversarialChallenge }>;
+    getChallengeStats(issueId: string): Promise<{ data: ChallengeStats }>;
+    getPredictions(issueId: string): Promise<{ data: Prediction[] }>;
+    getActivePredictions(limit?: number): Promise<{ data: Prediction[] }>;
+    getPredictionsDueSoon(days?: number): Promise<{ data: Prediction[] }>;
+    resolvePrediction(predictionId: string, data: {
+      status: "resolved_correct" | "resolved_incorrect" | "resolved_partial" | "expired" | "withdrawn";
+      actualOutcome: string;
+      actualValue?: number;
+      outcomeSource?: string;
+      postMortem?: string;
+    }): Promise<{ data: Prediction }>;
+    getValidationSummary(issueId: string): Promise<{ data: ValidationSummary }>;
+    triggerValidation(issueId: string): Promise<{ data: { validationScore: number; causalClaimsCount: number; challengesCount: number; predictionsCount: number; adversarialResult: string } }>;
     getManagedSourceStats(): Promise<SingleResponse<ManagedSourceStats>>;
     getManagedSources(params?: {
       limit?: number;

@@ -6,6 +6,7 @@ import {
   FeedbackEvent,
   ConfidenceAdjustment,
   SystemLearning,
+  EvaluationRun,
 } from "@/lib/api";
 import { useState } from "react";
 
@@ -39,6 +40,11 @@ export default function FeedbackPage() {
     queryFn: () => api.getSystemLearnings({ limit: 20 }),
   });
 
+  const { data: evaluationsData, isLoading: evaluationsLoading } = useQuery({
+    queryKey: ["evaluations"],
+    queryFn: () => api.getEvaluationRuns({ limit: 5 }),
+  });
+
   const applyAdjustmentsMutation = useMutation({
     mutationFn: () => api.runFeedbackProcessor(),
     onSuccess: (data) => {
@@ -57,6 +63,28 @@ export default function FeedbackPage() {
       setMessage({
         type: "error",
         text: error instanceof Error ? error.message : "Failed to apply adjustments",
+      });
+      setTimeout(() => setMessage(null), 5000);
+    },
+  });
+
+  const runEvaluationMutation = useMutation({
+    mutationFn: () => api.runSystemEvaluation(),
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ["evaluations"] });
+      queryClient.invalidateQueries({ queryKey: ["feedbackStats"] });
+      const eval_ = data.data;
+      const recommendations = eval_.recommendations?.length ?? 0;
+      setMessage({
+        type: "success",
+        text: `Evaluation completed with ${recommendations} recommendations`,
+      });
+      setTimeout(() => setMessage(null), 5000);
+    },
+    onError: (error) => {
+      setMessage({
+        type: "error",
+        text: error instanceof Error ? error.message : "Failed to run evaluation",
       });
       setTimeout(() => setMessage(null), 5000);
     },
@@ -89,6 +117,13 @@ export default function FeedbackPage() {
             className="px-4 py-2 border border-zinc-600 text-zinc-300 rounded-lg hover:bg-zinc-800"
           >
             {showCorrectionForm ? "Hide Correction Form" : "Manual Correction"}
+          </button>
+          <button
+            onClick={() => runEvaluationMutation.mutate()}
+            disabled={runEvaluationMutation.isPending}
+            className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 disabled:opacity-50"
+          >
+            {runEvaluationMutation.isPending ? "Evaluating..." : "Run Evaluation"}
           </button>
           <button
             onClick={() => applyAdjustmentsMutation.mutate()}
@@ -238,6 +273,37 @@ export default function FeedbackPage() {
           </div>
         </div>
       )}
+
+      {/* Evaluations */}
+      <div className="border border-zinc-700 rounded-lg overflow-hidden">
+        <div className="bg-indigo-500/10 border-b border-zinc-700 px-4 py-3 flex items-center justify-between">
+          <div>
+            <h3 className="font-semibold text-indigo-400">System Evaluations</h3>
+            <p className="text-xs text-zinc-400">Periodic snapshots of system health and recommendations</p>
+          </div>
+          <button
+            onClick={() => runEvaluationMutation.mutate()}
+            disabled={runEvaluationMutation.isPending}
+            className="px-3 py-1.5 bg-indigo-600 text-white text-sm rounded-lg hover:bg-indigo-700 disabled:opacity-50"
+          >
+            {runEvaluationMutation.isPending ? "Running..." : "New Evaluation"}
+          </button>
+        </div>
+        <div className="divide-y divide-zinc-800">
+          {evaluationsLoading ? (
+            <div className="p-8 text-center text-zinc-400">Loading evaluations...</div>
+          ) : evaluationsData?.data && evaluationsData.data.length > 0 ? (
+            evaluationsData.data.map((evaluation) => (
+              <EvaluationRow key={evaluation.id} evaluation={evaluation} />
+            ))
+          ) : (
+            <div className="p-8 text-center text-zinc-500">
+              <p>No evaluations yet</p>
+              <p className="text-xs mt-1">Click "Run Evaluation" to create a system snapshot</p>
+            </div>
+          )}
+        </div>
+      </div>
 
       {/* System Learnings */}
       <div className="border border-zinc-700 rounded-lg overflow-hidden">
@@ -406,6 +472,103 @@ function AdjustmentRow({ adjustment }: { adjustment: ConfidenceAdjustment }) {
       <div className="text-xs text-zinc-500">
         {adjustment.field}: {(adjustment.previousValue * 100).toFixed(0)}% → {(adjustment.newValue * 100).toFixed(0)}%
       </div>
+    </div>
+  );
+}
+
+function EvaluationRow({ evaluation }: { evaluation: EvaluationRun }) {
+  const [expanded, setExpanded] = useState(false);
+  const metrics = evaluation.metrics;
+  const recommendations = evaluation.recommendations ?? [];
+
+  const priorityColors = {
+    high: "text-red-400 bg-red-500/10",
+    medium: "text-yellow-400 bg-yellow-500/10",
+    low: "text-blue-400 bg-blue-500/10",
+  };
+
+  return (
+    <div className="p-4">
+      <div
+        className="flex items-center justify-between cursor-pointer"
+        onClick={() => setExpanded(!expanded)}
+      >
+        <div>
+          <div className="flex items-center gap-3">
+            <span className="text-sm font-medium text-zinc-200">
+              {new Date(evaluation.completedAt ?? evaluation.periodEnd).toLocaleDateString()}
+            </span>
+            <span className="text-xs text-zinc-500">
+              {new Date(evaluation.completedAt ?? evaluation.periodEnd).toLocaleTimeString()}
+            </span>
+            {recommendations.length > 0 && (
+              <span className="px-2 py-0.5 rounded text-xs bg-orange-500/20 text-orange-300">
+                {recommendations.length} recommendation{recommendations.length !== 1 ? "s" : ""}
+              </span>
+            )}
+          </div>
+          <div className="flex gap-4 mt-1 text-xs text-zinc-500">
+            <span>{metrics.patternsCreated ?? 0} patterns</span>
+            <span>{metrics.issuesCreated ?? 0} issues</span>
+            <span>{metrics.solutionsProposed ?? 0} solutions</span>
+            <span>{((metrics.avgPatternConfidence ?? 0) * 100).toFixed(0)}% avg confidence</span>
+          </div>
+        </div>
+        <div className="text-zinc-500 text-sm">
+          {expanded ? "▲" : "▼"}
+        </div>
+      </div>
+
+      {expanded && (
+        <div className="mt-4 space-y-4">
+          {/* Metrics Grid */}
+          <div className="grid grid-cols-4 gap-3">
+            <MetricCard label="Patterns" value={metrics.patternsCreated ?? 0} subvalue={`${metrics.patternsVerified ?? 0} verified`} />
+            <MetricCard label="Avg Confidence" value={`${((metrics.avgPatternConfidence ?? 0) * 100).toFixed(0)}%`} />
+            <MetricCard label="Issues" value={metrics.issuesCreated ?? 0} subvalue={`${metrics.issuesResolved ?? 0} resolved`} />
+            <MetricCard label="Avg Score" value={((metrics.avgCompositeScore ?? 0) * 100).toFixed(0)} />
+            <MetricCard label="Solutions" value={metrics.solutionsProposed ?? 0} subvalue={`${metrics.solutionsCompleted ?? 0} completed`} />
+            <MetricCard label="Effectiveness" value={`${((metrics.avgEffectiveness ?? 0) * 100).toFixed(0)}%`} />
+            <MetricCard label="Sources" value={metrics.sourcesMonitored ?? 0} subvalue={`${metrics.degradedSources ?? 0} degraded`} />
+            <MetricCard label="Adjustments" value={metrics.adjustmentsMade ?? 0} />
+          </div>
+
+          {/* Recommendations */}
+          {recommendations.length > 0 && (
+            <div className="space-y-2">
+              <h4 className="text-sm font-medium text-zinc-300">Recommendations</h4>
+              <div className="space-y-2">
+                {recommendations.map((rec, i) => (
+                  <div key={i} className="bg-zinc-800/50 rounded-lg p-3">
+                    <div className="flex items-start gap-3">
+                      <span className={`px-2 py-0.5 rounded text-xs ${priorityColors[rec.priority]}`}>
+                        {rec.priority}
+                      </span>
+                      <div className="flex-1">
+                        <div className="text-sm text-zinc-200">{rec.recommendation}</div>
+                        <div className="flex gap-4 mt-1 text-xs text-zinc-500">
+                          <span>Area: {rec.area}</span>
+                          <span>Impact: {rec.expectedImpact}</span>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function MetricCard({ label, value, subvalue }: { label: string; value: number | string; subvalue?: string }) {
+  return (
+    <div className="bg-zinc-800/50 rounded p-2">
+      <div className="text-xs text-zinc-500">{label}</div>
+      <div className="text-lg font-semibold text-zinc-200">{value}</div>
+      {subvalue && <div className="text-xs text-zinc-500">{subvalue}</div>}
     </div>
   );
 }

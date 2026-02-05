@@ -46,6 +46,16 @@ export const playbookExecutions = pgTable("playbook_executions", {
     solutionsCreated?: string[];
     verificationsCreated?: string[];
     notifications?: string[];
+    // Discovery-specific outputs
+    sourcesUsed?: Array<{
+      id: string;
+      name: string;
+      url: string;
+      credibility: number;
+      itemCount: number;
+    }>;
+    deduplicatedPatterns?: number;
+    message?: string;
   }>().default({}),
 
   error: text("error"),

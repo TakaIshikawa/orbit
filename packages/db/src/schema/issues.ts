@@ -60,6 +60,49 @@ export const issues = pgTable("issues", {
   affectedDomains: jsonb("affected_domains").$type<string[]>().notNull(),
   leveragePoints: jsonb("leverage_points").$type<string[]>().notNull().default([]),
 
+  // Structured causal analysis (extends rootCauses with evidence)
+  causalAnalysis: jsonb("causal_analysis").$type<{
+    // Links to formal causal claims and chains
+    primaryChainId?: string;
+    alternativeChainIds?: string[];
+    causalClaimIds?: string[];
+
+    // Summary of causal understanding
+    causalSummary?: string;
+    confidenceInCausation: number;  // 0-1
+
+    // Key uncertainties in causal model
+    uncertainties?: Array<{
+      description: string;
+      impact: "high" | "medium" | "low";
+      resolvable: boolean;
+      resolutionPath?: string;
+    }>;
+
+    // What would change our mind about the causal model?
+    cruxes?: Array<{
+      statement: string;
+      currentBelief: number;  // 0-1 probability
+      ifTrueImpact: string;
+      ifFalseImpact: string;
+    }>;
+
+    lastAnalyzedAt?: string;
+  }>(),
+
+  // Validation status
+  validationStatus: jsonb("validation_status").$type<{
+    adversarialValidationComplete: boolean;
+    adversarialSessionId?: string;
+    predictionsGenerated: boolean;
+    predictionSetId?: string;
+    causalClaimsValidated: boolean;
+
+    // Overall validation score (0-1)
+    validationScore?: number;
+    lastValidatedAt?: string;
+  }>(),
+
   // IUTLN scores
   scoreImpact: real("score_impact").notNull(),
   scoreUrgency: real("score_urgency").notNull(),

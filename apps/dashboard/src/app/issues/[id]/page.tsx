@@ -4,7 +4,7 @@ import { useState, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useParams, useSearchParams } from "next/navigation";
 import Link from "next/link";
-import { api, type Solution, type Verification, type Issue, type SimpleStatus, type Outcome } from "@/lib/api";
+import { api, type Solution, type Verification, type Issue, type SimpleStatus, type Outcome, type CausalClaim, type AdversarialChallenge, type Prediction, type ValidationSummary, type ChallengeStats } from "@/lib/api";
 import { IssueRelationshipGraph } from "@/components/issue-relationship-graph";
 import { OutcomeRecordingModal } from "@/components/outcome-recording-modal";
 
@@ -20,7 +20,7 @@ const simpleStatusConfig: Record<SimpleStatus, { label: string; color: string; i
   resolved: { label: "Resolved", color: "bg-green-900/50 text-green-300 border-green-700", icon: "+" },
 };
 
-type Tab = "problem" | "evidence" | "actions" | "efforts" | "outcomes";
+type Tab = "problem" | "evidence" | "validation" | "actions" | "efforts" | "outcomes";
 
 export default function IssueDetailPage() {
   const params = useParams();
@@ -67,6 +67,12 @@ export default function IssueDetailPage() {
   const { data: verificationsData, isLoading: verificationsLoading } = useQuery({
     queryKey: ["verifications-by-issue", id],
     queryFn: () => api.getVerificationsByIssue(id).catch(() => ({ data: [], meta: { total: 0, issueId: id, patternCount: 0, hasBrief: false } })),
+    enabled: !!id,
+  });
+
+  const { data: validationSummaryData } = useQuery({
+    queryKey: ["validation-summary", id],
+    queryFn: () => api.getValidationSummary(id).catch(() => ({ data: null })),
     enabled: !!id,
   });
 
@@ -136,6 +142,7 @@ export default function IssueDetailPage() {
   const situation = situationData?.data;
   const solutions = solutionsData?.data ?? [];
   const verifications = verificationsData?.data ?? [];
+  const validationSummary = validationSummaryData?.data;
 
   // Separate solutions by status
   const proposedSolutions = solutions.filter(s => s.solutionStatus === "proposed" || s.solutionStatus === "approved");
@@ -154,6 +161,7 @@ export default function IssueDetailPage() {
   const tabs: { id: Tab; label: string; count?: number }[] = [
     { id: "problem", label: "The Problem" },
     { id: "evidence", label: "The Evidence", count: verifications.length },
+    { id: "validation", label: "Validation", count: validationSummary?.unresolvedChallenges },
     { id: "actions", label: "What Can Be Done", count: proposedSolutions.length },
     { id: "efforts", label: "Active Efforts", count: inProgressSolutions.length },
     { id: "outcomes", label: "Outcomes", count: completedSolutions.length },
@@ -345,6 +353,9 @@ export default function IssueDetailPage() {
         {activeTab === "evidence" && (
           <TheEvidenceTab verifications={verifications} isLoading={verificationsLoading} />
         )}
+        {activeTab === "validation" && (
+          <ValidationTab issueId={id} summary={validationSummary} />
+        )}
         {activeTab === "actions" && (
           <WhatCanBeDoneTab
             solutions={proposedSolutions}
@@ -409,6 +420,15 @@ interface IssueDetail {
   patternIds: string[];
   rootCauses: string[];
   leveragePoints: string[];
+  sources: Array<{
+    sourceId: string;
+    sourceName: string;
+    sourceUrl: string;
+    itemTitle: string;
+    itemUrl: string;
+    excerpt?: string;
+    credibility?: number;
+  }>;
   version: number;
   author: string;
   createdAt: string;
@@ -531,6 +551,50 @@ function TheProblemTab({
               </li>
             ))}
           </ul>
+        </div>
+      )}
+
+      {/* Sources */}
+      {issue.sources && issue.sources.length > 0 && (
+        <div className="border border-blue-900/50 rounded-lg p-4">
+          <h2 className="font-semibold text-blue-300 mb-3">Sources ({issue.sources.length})</h2>
+          <div className="space-y-3">
+            {issue.sources.map((source, i) => (
+              <div key={i} className="bg-gray-800/50 rounded-lg p-3">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="flex-1 min-w-0">
+                    <a
+                      href={source.itemUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-sm font-medium text-blue-400 hover:text-blue-300 hover:underline"
+                    >
+                      {source.itemTitle}
+                    </a>
+                    <p className="text-xs text-gray-500 mt-0.5">
+                      via <span className="text-gray-400">{source.sourceName}</span>
+                    </p>
+                    {source.excerpt && (
+                      <p className="text-sm text-gray-400 mt-2 italic border-l-2 border-gray-700 pl-2">
+                        "{source.excerpt}"
+                      </p>
+                    )}
+                  </div>
+                  {source.credibility !== undefined && (
+                    <div className="text-right shrink-0">
+                      <div className={`text-sm font-medium ${
+                        source.credibility >= 0.7 ? "text-green-400" :
+                        source.credibility >= 0.4 ? "text-yellow-400" : "text-red-400"
+                      }`}>
+                        {(source.credibility * 100).toFixed(0)}%
+                      </div>
+                      <div className="text-xs text-gray-500">credibility</div>
+                    </div>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
         </div>
       )}
 
@@ -1227,6 +1291,634 @@ function ScoreCard({
     <div className={`rounded-lg p-3 ${bgColor}`} title={description}>
       <div className="text-xs text-gray-500 mb-1">{label}</div>
       <div className={`text-xl font-bold ${color}`}>{(value * 100).toFixed(0)}%</div>
+    </div>
+  );
+}
+
+/* ==================== Validation Tab ==================== */
+
+function ValidationTab({
+  issueId,
+  summary,
+}: {
+  issueId: string;
+  summary?: ValidationSummary | null;
+}) {
+  const queryClient = useQueryClient();
+  const [showResolveModal, setShowResolveModal] = useState<{ challengeId: string; statement: string } | null>(null);
+  const [showPredictionModal, setShowPredictionModal] = useState<{ predictionId: string; statement: string } | null>(null);
+
+  const { data: challengesData, isLoading: challengesLoading } = useQuery({
+    queryKey: ["challenges", issueId],
+    queryFn: () => api.getChallenges(issueId).catch(() => ({ data: [] })),
+    enabled: !!issueId,
+  });
+
+  const { data: predictionsData, isLoading: predictionsLoading } = useQuery({
+    queryKey: ["predictions", issueId],
+    queryFn: () => api.getPredictions(issueId).catch(() => ({ data: [] })),
+    enabled: !!issueId,
+  });
+
+  const { data: causalClaimsData, isLoading: claimsLoading } = useQuery({
+    queryKey: ["causal-claims", issueId],
+    queryFn: () => api.getCausalClaims(issueId).catch(() => ({ data: [] })),
+    enabled: !!issueId,
+  });
+
+  const triggerValidationMutation = useMutation({
+    mutationFn: () => api.triggerValidation(issueId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["validation-summary", issueId] });
+      queryClient.invalidateQueries({ queryKey: ["challenges", issueId] });
+      queryClient.invalidateQueries({ queryKey: ["predictions", issueId] });
+      queryClient.invalidateQueries({ queryKey: ["causal-claims", issueId] });
+    },
+  });
+
+  const challenges = challengesData?.data ?? [];
+  const predictions = predictionsData?.data ?? [];
+  const causalClaims = causalClaimsData?.data ?? [];
+
+  const pendingChallenges = challenges.filter(c => c.resolution === "pending");
+  const activePredictions = predictions.filter(p => p.status === "active");
+
+  if (!summary?.isValidated && challenges.length === 0 && predictions.length === 0) {
+    return (
+      <div className="text-center py-12">
+        <div className="text-gray-500 mb-4">
+          <p className="mb-2">No validation data yet</p>
+          <p className="text-sm">Run epistemological validation to analyze causal claims, generate challenges, and create testable predictions</p>
+        </div>
+        <button
+          onClick={() => triggerValidationMutation.mutate()}
+          disabled={triggerValidationMutation.isPending}
+          className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 transition-colors"
+        >
+          {triggerValidationMutation.isPending ? "Running Validation..." : "Run Validation"}
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-6">
+      {/* Validation Summary */}
+      {summary && (
+        <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+          <div className="border border-gray-800 rounded-lg p-3">
+            <div className={`text-xl font-bold ${
+              summary.validationScore && summary.validationScore >= 0.7 ? "text-green-400" :
+              summary.validationScore && summary.validationScore >= 0.4 ? "text-yellow-400" : "text-red-400"
+            }`}>
+              {summary.validationScore ? (summary.validationScore * 100).toFixed(0) + "%" : "—"}
+            </div>
+            <div className="text-xs text-gray-500">Validation Score</div>
+          </div>
+          <div className="border border-gray-800 rounded-lg p-3">
+            <div className="text-xl font-bold text-blue-400">{summary.causalClaimCount}</div>
+            <div className="text-xs text-gray-500">Causal Claims</div>
+          </div>
+          <div className="border border-gray-800 rounded-lg p-3">
+            <div className="text-xl font-bold text-purple-400">{summary.challengeCount}</div>
+            <div className="text-xs text-gray-500">Challenges</div>
+          </div>
+          <div className="border border-gray-800 rounded-lg p-3">
+            <div className={`text-xl font-bold ${summary.unresolvedChallenges > 0 ? "text-red-400" : "text-green-400"}`}>
+              {summary.unresolvedChallenges}
+            </div>
+            <div className="text-xs text-gray-500">Unresolved</div>
+          </div>
+          <div className="border border-gray-800 rounded-lg p-3">
+            <div className="text-xl font-bold text-yellow-400">{summary.activePredictions}</div>
+            <div className="text-xs text-gray-500">Active Predictions</div>
+          </div>
+        </div>
+      )}
+
+      {/* Re-run Validation Button */}
+      <div className="flex justify-end">
+        <button
+          onClick={() => triggerValidationMutation.mutate()}
+          disabled={triggerValidationMutation.isPending}
+          className="text-sm px-3 py-1 bg-gray-800 text-gray-400 rounded hover:bg-gray-700 hover:text-white transition-colors disabled:opacity-50"
+        >
+          {triggerValidationMutation.isPending ? "Running..." : "Re-run Validation"}
+        </button>
+      </div>
+
+      {/* Causal Claims Section */}
+      {causalClaims.length > 0 && (
+        <div className="border border-blue-900/50 rounded-lg p-4">
+          <h3 className="font-semibold text-blue-300 mb-3">Causal Claims ({causalClaims.length})</h3>
+          <div className="space-y-3">
+            {causalClaims.map((claim) => (
+              <CausalClaimCard key={claim.id} claim={claim} />
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Adversarial Challenges Section */}
+      <div className="border border-purple-900/50 rounded-lg p-4">
+        <h3 className="font-semibold text-purple-300 mb-3">
+          Adversarial Challenges ({challenges.length})
+          {pendingChallenges.length > 0 && (
+            <span className="ml-2 text-xs bg-red-900/50 text-red-300 px-2 py-0.5 rounded">
+              {pendingChallenges.length} pending
+            </span>
+          )}
+        </h3>
+        {challengesLoading ? (
+          <div className="animate-pulse text-gray-400">Loading challenges...</div>
+        ) : challenges.length === 0 ? (
+          <p className="text-gray-500 text-sm">No challenges generated yet</p>
+        ) : (
+          <div className="space-y-3">
+            {challenges.map((challenge) => (
+              <ChallengeCard
+                key={challenge.id}
+                challenge={challenge}
+                onResolve={() => setShowResolveModal({ challengeId: challenge.id, statement: challenge.challengeStatement })}
+              />
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* Predictions Section */}
+      <div className="border border-yellow-900/50 rounded-lg p-4">
+        <h3 className="font-semibold text-yellow-300 mb-3">
+          Predictions ({predictions.length})
+          {activePredictions.length > 0 && (
+            <span className="ml-2 text-xs bg-blue-900/50 text-blue-300 px-2 py-0.5 rounded">
+              {activePredictions.length} active
+            </span>
+          )}
+        </h3>
+        {predictionsLoading ? (
+          <div className="animate-pulse text-gray-400">Loading predictions...</div>
+        ) : predictions.length === 0 ? (
+          <p className="text-gray-500 text-sm">No predictions generated yet</p>
+        ) : (
+          <div className="space-y-3">
+            {predictions.map((prediction) => (
+              <PredictionCard
+                key={prediction.id}
+                prediction={prediction}
+                onRecordOutcome={() => setShowPredictionModal({ predictionId: prediction.id, statement: prediction.predictionStatement })}
+              />
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* Resolve Challenge Modal */}
+      {showResolveModal && (
+        <ResolveChallengeModal
+          challengeId={showResolveModal.challengeId}
+          statement={showResolveModal.statement}
+          onClose={() => setShowResolveModal(null)}
+          onSuccess={() => {
+            queryClient.invalidateQueries({ queryKey: ["challenges", issueId] });
+            queryClient.invalidateQueries({ queryKey: ["validation-summary", issueId] });
+            setShowResolveModal(null);
+          }}
+        />
+      )}
+
+      {/* Record Prediction Outcome Modal */}
+      {showPredictionModal && (
+        <RecordPredictionOutcomeModal
+          predictionId={showPredictionModal.predictionId}
+          statement={showPredictionModal.statement}
+          onClose={() => setShowPredictionModal(null)}
+          onSuccess={() => {
+            queryClient.invalidateQueries({ queryKey: ["predictions", issueId] });
+            queryClient.invalidateQueries({ queryKey: ["validation-summary", issueId] });
+            setShowPredictionModal(null);
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
+function CausalClaimCard({ claim }: { claim: CausalClaim }) {
+  const [expanded, setExpanded] = useState(false);
+
+  const strengthColors: Record<string, string> = {
+    experimental: "bg-green-900/50 text-green-300",
+    quasi_experimental: "bg-green-900/30 text-green-300",
+    longitudinal: "bg-blue-900/50 text-blue-300",
+    cross_sectional: "bg-yellow-900/50 text-yellow-300",
+    observational: "bg-yellow-900/30 text-yellow-300",
+    expert_consensus: "bg-purple-900/50 text-purple-300",
+    theoretical: "bg-gray-700 text-gray-300",
+    anecdotal: "bg-red-900/50 text-red-300",
+  };
+
+  return (
+    <div className="bg-gray-800/30 rounded-lg p-3">
+      <div className="flex items-start justify-between gap-2 mb-2">
+        <span className={`text-xs px-2 py-0.5 rounded ${strengthColors[claim.evidenceStrength] || "bg-gray-700 text-gray-300"}`}>
+          {claim.evidenceStrength.replace(/_/g, " ")}
+        </span>
+        <span className="text-xs text-gray-500">{(claim.confidence * 100).toFixed(0)}% confidence</span>
+      </div>
+      <button onClick={() => setExpanded(!expanded)} className="w-full text-left">
+        <p className="text-sm text-gray-200">
+          <span className="text-blue-400">{claim.cause}</span>
+          <span className="text-gray-500 mx-2">→</span>
+          <span className="text-green-400">{claim.effect}</span>
+        </p>
+      </button>
+      {expanded && (
+        <div className="mt-3 pt-3 border-t border-gray-700 text-sm">
+          {claim.mechanism && (
+            <div className="mb-2">
+              <span className="text-gray-500">Mechanism:</span>
+              <p className="text-gray-300">{claim.mechanism}</p>
+            </div>
+          )}
+          {claim.hillCriteria && (
+            <div className="grid grid-cols-3 gap-2 mt-2">
+              <div className="text-xs">
+                <span className="text-gray-500">Strength:</span> {claim.hillCriteria.strength.score}/5
+              </div>
+              <div className="text-xs">
+                <span className="text-gray-500">Consistency:</span> {claim.hillCriteria.consistency.score}/5
+              </div>
+              <div className="text-xs">
+                <span className="text-gray-500">Temporality:</span> {claim.hillCriteria.temporality.score}/5
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ChallengeCard({
+  challenge,
+  onResolve,
+}: {
+  challenge: AdversarialChallenge;
+  onResolve: () => void;
+}) {
+  const [expanded, setExpanded] = useState(false);
+
+  const severityColors: Record<string, string> = {
+    critical: "bg-red-900/50 text-red-300",
+    major: "bg-orange-900/50 text-orange-300",
+    moderate: "bg-yellow-900/50 text-yellow-300",
+    minor: "bg-gray-700 text-gray-300",
+  };
+
+  const resolutionColors: Record<string, string> = {
+    pending: "bg-blue-900/50 text-blue-300",
+    resolved: "bg-green-900/50 text-green-300",
+    partially_resolved: "bg-yellow-900/50 text-yellow-300",
+    unresolved: "bg-red-900/50 text-red-300",
+    accepted: "bg-purple-900/50 text-purple-300",
+  };
+
+  return (
+    <div className="bg-gray-800/30 rounded-lg p-3">
+      <div className="flex items-start justify-between gap-2 mb-2">
+        <div className="flex items-center gap-2">
+          <span className={`text-xs px-2 py-0.5 rounded ${severityColors[challenge.severity]}`}>
+            {challenge.severity}
+          </span>
+          <span className={`text-xs px-2 py-0.5 rounded ${resolutionColors[challenge.resolution]}`}>
+            {challenge.resolution.replace(/_/g, " ")}
+          </span>
+          <span className="text-xs text-gray-500 capitalize">{challenge.challengeType.replace(/_/g, " ")}</span>
+        </div>
+        {challenge.resolution === "pending" && (
+          <button
+            onClick={onResolve}
+            className="text-xs px-2 py-1 bg-blue-600 text-white rounded hover:bg-blue-700 transition-colors"
+          >
+            Resolve
+          </button>
+        )}
+      </div>
+      <button onClick={() => setExpanded(!expanded)} className="w-full text-left">
+        <p className="text-sm text-gray-200">{challenge.challengeStatement}</p>
+      </button>
+      {expanded && (
+        <div className="mt-3 pt-3 border-t border-gray-700 text-sm space-y-2">
+          <div>
+            <span className="text-gray-500">Reasoning:</span>
+            <p className="text-gray-300">{challenge.challengeReasoning}</p>
+          </div>
+          {challenge.alternativeProposal && (
+            <div>
+              <span className="text-gray-500">Alternative:</span>
+              <p className="text-gray-300">{challenge.alternativeProposal}</p>
+            </div>
+          )}
+          {challenge.resolutionNotes && (
+            <div>
+              <span className="text-gray-500">Resolution:</span>
+              <p className="text-gray-300">{challenge.resolutionNotes}</p>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function PredictionCard({
+  prediction,
+  onRecordOutcome,
+}: {
+  prediction: Prediction;
+  onRecordOutcome: () => void;
+}) {
+  const [expanded, setExpanded] = useState(false);
+
+  const statusColors: Record<string, string> = {
+    active: "bg-blue-900/50 text-blue-300",
+    resolved_correct: "bg-green-900/50 text-green-300",
+    resolved_incorrect: "bg-red-900/50 text-red-300",
+    resolved_partial: "bg-yellow-900/50 text-yellow-300",
+    expired: "bg-gray-700 text-gray-300",
+    withdrawn: "bg-gray-700 text-gray-400",
+  };
+
+  const daysUntilDeadline = Math.ceil(
+    (new Date(prediction.resolutionDeadline).getTime() - Date.now()) / (1000 * 60 * 60 * 24)
+  );
+
+  return (
+    <div className="bg-gray-800/30 rounded-lg p-3">
+      <div className="flex items-start justify-between gap-2 mb-2">
+        <div className="flex items-center gap-2">
+          <span className={`text-xs px-2 py-0.5 rounded ${statusColors[prediction.status]}`}>
+            {prediction.status.replace(/_/g, " ")}
+          </span>
+          <span className="text-xs bg-gray-700 px-2 py-0.5 rounded">
+            {(prediction.probability * 100).toFixed(0)}% probability
+          </span>
+          {prediction.status === "active" && (
+            <span className={`text-xs ${daysUntilDeadline <= 7 ? "text-red-400" : daysUntilDeadline <= 30 ? "text-yellow-400" : "text-gray-500"}`}>
+              {daysUntilDeadline > 0 ? `${daysUntilDeadline} days left` : "Overdue"}
+            </span>
+          )}
+        </div>
+        {prediction.status === "active" && (
+          <button
+            onClick={onRecordOutcome}
+            className="text-xs px-2 py-1 bg-green-600 text-white rounded hover:bg-green-700 transition-colors"
+          >
+            Record Outcome
+          </button>
+        )}
+      </div>
+      <button onClick={() => setExpanded(!expanded)} className="w-full text-left">
+        <p className="text-sm text-gray-200">{prediction.predictionStatement}</p>
+      </button>
+      {expanded && (
+        <div className="mt-3 pt-3 border-t border-gray-700 text-sm space-y-2">
+          <div>
+            <span className="text-gray-500">Reasoning:</span>
+            <p className="text-gray-300">{prediction.reasoning}</p>
+          </div>
+          {prediction.keyAssumptions.length > 0 && (
+            <div>
+              <span className="text-gray-500">Key Assumptions:</span>
+              <ul className="list-disc list-inside text-gray-300">
+                {prediction.keyAssumptions.map((assumption, i) => (
+                  <li key={i}>{assumption}</li>
+                ))}
+              </ul>
+            </div>
+          )}
+          {prediction.actualOutcome && (
+            <div>
+              <span className="text-gray-500">Actual Outcome:</span>
+              <p className="text-gray-300">{prediction.actualOutcome}</p>
+            </div>
+          )}
+          {prediction.brierScore !== null && (
+            <div className="text-xs text-gray-500">
+              Brier Score: {prediction.brierScore.toFixed(3)}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ResolveChallengeModal({
+  challengeId,
+  statement,
+  onClose,
+  onSuccess,
+}: {
+  challengeId: string;
+  statement: string;
+  onClose: () => void;
+  onSuccess: () => void;
+}) {
+  const [resolution, setResolution] = useState<"resolved" | "partially_resolved" | "unresolved" | "accepted">("resolved");
+  const [notes, setNotes] = useState("");
+  const [confidenceImpact, setConfidenceImpact] = useState(0);
+
+  const resolveMutation = useMutation({
+    mutationFn: () => api.resolveChallenge(challengeId, {
+      resolution,
+      resolutionNotes: notes,
+      confidenceImpact: confidenceImpact / 100,
+    }),
+    onSuccess,
+  });
+
+  return (
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+      <div className="bg-gray-900 border border-gray-700 rounded-lg p-6 max-w-lg w-full mx-4">
+        <h3 className="text-lg font-semibold mb-4">Resolve Challenge</h3>
+        <p className="text-sm text-gray-400 mb-4 border-l-2 border-gray-700 pl-3">{statement}</p>
+
+        <div className="space-y-4">
+          <div>
+            <label className="block text-sm font-medium text-gray-400 mb-2">Resolution</label>
+            <select
+              value={resolution}
+              onChange={(e) => setResolution(e.target.value as typeof resolution)}
+              className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white"
+            >
+              <option value="resolved">Resolved - Challenge addressed satisfactorily</option>
+              <option value="partially_resolved">Partially Resolved - Some concerns remain</option>
+              <option value="unresolved">Unresolved - Challenge remains valid</option>
+              <option value="accepted">Accepted - Challenge is correct, updating claims</option>
+            </select>
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-400 mb-2">Resolution Notes</label>
+            <textarea
+              value={notes}
+              onChange={(e) => setNotes(e.target.value)}
+              placeholder="Explain how this challenge was resolved..."
+              className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white h-24 resize-none"
+            />
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-400 mb-2">
+              Confidence Impact ({confidenceImpact > 0 ? "+" : ""}{confidenceImpact}%)
+            </label>
+            <input
+              type="range"
+              min="-50"
+              max="50"
+              value={confidenceImpact}
+              onChange={(e) => setConfidenceImpact(parseInt(e.target.value))}
+              className="w-full"
+            />
+            <div className="flex justify-between text-xs text-gray-500">
+              <span>Decreases confidence</span>
+              <span>No change</span>
+              <span>Increases confidence</span>
+            </div>
+          </div>
+        </div>
+
+        <div className="flex justify-end gap-3 mt-6">
+          <button
+            onClick={onClose}
+            className="px-4 py-2 bg-gray-800 text-gray-300 rounded-lg hover:bg-gray-700 transition-colors"
+          >
+            Cancel
+          </button>
+          <button
+            onClick={() => resolveMutation.mutate()}
+            disabled={!notes || resolveMutation.isPending}
+            className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 transition-colors"
+          >
+            {resolveMutation.isPending ? "Saving..." : "Save Resolution"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function RecordPredictionOutcomeModal({
+  predictionId,
+  statement,
+  onClose,
+  onSuccess,
+}: {
+  predictionId: string;
+  statement: string;
+  onClose: () => void;
+  onSuccess: () => void;
+}) {
+  const [status, setStatus] = useState<"resolved_correct" | "resolved_incorrect" | "resolved_partial" | "expired" | "withdrawn">("resolved_correct");
+  const [actualOutcome, setActualOutcome] = useState("");
+  const [actualValue, setActualValue] = useState("");
+  const [outcomeSource, setOutcomeSource] = useState("");
+  const [postMortem, setPostMortem] = useState("");
+
+  const resolveMutation = useMutation({
+    mutationFn: () => api.resolvePrediction(predictionId, {
+      status,
+      actualOutcome,
+      actualValue: actualValue ? parseFloat(actualValue) : undefined,
+      outcomeSource: outcomeSource || undefined,
+      postMortem: postMortem || undefined,
+    }),
+    onSuccess,
+  });
+
+  return (
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+      <div className="bg-gray-900 border border-gray-700 rounded-lg p-6 max-w-lg w-full mx-4 max-h-[90vh] overflow-y-auto">
+        <h3 className="text-lg font-semibold mb-4">Record Prediction Outcome</h3>
+        <p className="text-sm text-gray-400 mb-4 border-l-2 border-gray-700 pl-3">{statement}</p>
+
+        <div className="space-y-4">
+          <div>
+            <label className="block text-sm font-medium text-gray-400 mb-2">Outcome Status</label>
+            <select
+              value={status}
+              onChange={(e) => setStatus(e.target.value as typeof status)}
+              className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white"
+            >
+              <option value="resolved_correct">Correct - Prediction was accurate</option>
+              <option value="resolved_incorrect">Incorrect - Prediction was wrong</option>
+              <option value="resolved_partial">Partial - Prediction was partially correct</option>
+              <option value="expired">Expired - Unable to verify in time</option>
+              <option value="withdrawn">Withdrawn - Prediction no longer relevant</option>
+            </select>
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-400 mb-2">Actual Outcome *</label>
+            <textarea
+              value={actualOutcome}
+              onChange={(e) => setActualOutcome(e.target.value)}
+              placeholder="What actually happened..."
+              className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white h-20 resize-none"
+            />
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-400 mb-2">Actual Value (if measurable)</label>
+            <input
+              type="number"
+              value={actualValue}
+              onChange={(e) => setActualValue(e.target.value)}
+              placeholder="e.g., 42.5"
+              className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white"
+            />
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-400 mb-2">Outcome Source</label>
+            <input
+              type="text"
+              value={outcomeSource}
+              onChange={(e) => setOutcomeSource(e.target.value)}
+              placeholder="URL or reference to verification source"
+              className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white"
+            />
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-400 mb-2">Post-Mortem Notes</label>
+            <textarea
+              value={postMortem}
+              onChange={(e) => setPostMortem(e.target.value)}
+              placeholder="What did we learn? Why was the prediction correct/incorrect?"
+              className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white h-20 resize-none"
+            />
+          </div>
+        </div>
+
+        <div className="flex justify-end gap-3 mt-6">
+          <button
+            onClick={onClose}
+            className="px-4 py-2 bg-gray-800 text-gray-300 rounded-lg hover:bg-gray-700 transition-colors"
+          >
+            Cancel
+          </button>
+          <button
+            onClick={() => resolveMutation.mutate()}
+            disabled={!actualOutcome || resolveMutation.isPending}
+            className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50 transition-colors"
+          >
+            {resolveMutation.isPending ? "Saving..." : "Record Outcome"}
+          </button>
+        </div>
+      </div>
     </div>
   );
 }

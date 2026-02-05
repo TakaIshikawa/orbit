@@ -184,6 +184,41 @@ export class FeedbackEventRepository extends BaseRepository<
       },
     });
   }
+
+  async createPlaybookExecutionFeedback(
+    executionId: string,
+    playbookId: string,
+    data: {
+      success: boolean;
+      completionRate: number;
+      durationMs: number;
+      stepsCompleted: number;
+      totalSteps: number;
+      errorCount?: number;
+      errors?: string[];
+    }
+  ): Promise<FeedbackEventRow> {
+    const id = `fb_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`;
+
+    return this.create({
+      id,
+      feedbackType: "playbook_execution",
+      status: "pending",
+      sourceEntityType: "playbook_execution",
+      sourceEntityId: executionId,
+      targetEntityType: "playbook",
+      targetEntityId: playbookId,
+      feedbackData: {
+        success: data.success,
+        completionRate: data.completionRate,
+        durationMs: data.durationMs,
+        stepsCompleted: data.stepsCompleted,
+        totalSteps: data.totalSteps,
+        errorCount: data.errorCount,
+        errors: data.errors,
+      },
+    });
+  }
 }
 
 export class ConfidenceAdjustmentRepository extends BaseRepository<

@@ -194,10 +194,10 @@ export function QuickDiscovery({ onRunComplete }: QuickDiscoveryProps) {
             <h2 className="text-xl font-semibold">Recent Discoveries</h2>
             {runsData?.meta && runsData.meta.total > 10 && (
               <Link
-                href="/playbooks/executions"
+                href="/issues"
                 className="text-sm text-blue-400 hover:text-blue-300"
               >
-                View all ({runsData.meta.total})
+                View all issues
               </Link>
             )}
           </div>

@@ -189,6 +189,7 @@ class DiscoveryExecutor {
         name: r.sourceName,
         url: r.sourceUrl,
         credibility: r.credibility,
+        itemCount: 1, // Legacy executor processes one item per source
       }));
 
       if (scoutResults.length === 0) {

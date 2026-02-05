@@ -18,3 +18,6 @@ export * from "./managed-sources.js";
 export * from "./discovery-profiles.js";
 export * from "./reference-classes.js";
 export * from "./bayesian-updates.js";
+export * from "./causal-claims.js";
+export * from "./adversarial-validations.js";
+export * from "./predictions.js";

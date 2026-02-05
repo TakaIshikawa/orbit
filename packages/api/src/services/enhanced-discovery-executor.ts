@@ -30,6 +30,7 @@ import { generateId, computeContentHash } from "@orbit/core";
 import { eventBus } from "../events/index.js";
 import { SourceFetcherRegistry, type FetchedContent, type FetchedItem } from "./source-fetchers/index.js";
 import { getBayesianScoringService } from "./bayesian-scoring.js";
+import { EpistemologicalValidationService } from "./epistemological-validation.js";
 
 // ============================================================================
 // Types
@@ -45,6 +46,7 @@ interface DiscoveryContext {
   maxPatterns: number;
   maxIssues: number;
   minSourceCredibility: number;
+  enableEpistemologicalValidation?: boolean; // Run causal analysis, adversarial validation, and predictions
 }
 
 interface ExtractedClaim {
@@ -279,6 +281,26 @@ export class EnhancedDiscoveryExecutor {
       await executionRepo.incrementStep(executionId);
       await executionRepo.appendLog(executionId, "info", `Created ${verificationIds.length} verifications`, 3);
 
+      // Step 4.5: Epistemological validation
+      // Auto-run for high-score issues (compositeScore > 0.5) or if explicitly enabled
+      const highScoreIssueIds = savedIssues
+        .filter(issue => issue.compositeScore > 0.5)
+        .map(issue => issue.id);
+
+      const shouldRunValidation = context?.enableEpistemologicalValidation || highScoreIssueIds.length > 0;
+      const issuesToValidate = context?.enableEpistemologicalValidation ? issueIds : highScoreIssueIds;
+
+      if (shouldRunValidation && issuesToValidate.length > 0) {
+        await executionRepo.appendLog(
+          executionId,
+          "info",
+          `Step 4.5: Running epistemological validation for ${issuesToValidate.length} issues (causal analysis, adversarial challenges, predictions)...`,
+          3
+        );
+        await this.runEpistemologicalValidation(issuesToValidate);
+        await executionRepo.appendLog(executionId, "info", "Epistemological validation complete", 3);
+      }
+
       // Step 5: Generate solutions
       await executionRepo.appendLog(executionId, "info", "Step 5: Generating solutions...", 4);
       const solutionIds = await this.generateAndSaveSolutions(savedIssues, context);
@@ -472,26 +494,28 @@ CONTENT:
 ${sourceText}
 
 For each claim, provide:
-1. The claim statement (clear, specific)
+1. The claim statement (clear, specific, with the key data point)
 2. Category: factual, statistical, causal, or predictive
-3. A relevant excerpt from the source
+3. A relevant excerpt from the source (MUST be an exact quote that supports the claim)
 4. Confidence level (0-1)
 5. The ITEM_N identifier that this claim comes from (e.g., "ITEM_0")
+
+IMPORTANT: The excerpt must be a direct quote from the source that provides evidence for the claim. This is critical for verification.
 
 Respond in JSON:
 {
   "claims": [
     {
-      "statement": "Clear claim statement",
+      "statement": "Clear claim statement with specific data",
       "category": "statistical",
-      "excerpt": "Quote from source",
+      "excerpt": "Exact quote from source text supporting this claim",
       "confidence": 0.8,
       "itemRef": "ITEM_0"
     }
   ]
 }
 
-Extract up to 10 key claims.`;
+Extract up to 10 key claims, prioritizing those with strong evidence in the text.`;
 
       try {
         const response = await this.anthropic.messages.create({
@@ -999,8 +1023,14 @@ Respond in JSON:
   ): Promise<DiscoveredIssue[]> {
     if (patterns.length === 0) return [];
 
+    // Build pattern summaries WITH source citations
     const patternSummaries = patterns
-      .map((p, i) => `[${patternIds[i]}] ${p.title}: ${p.description} (confidence: ${p.confidence.toFixed(2)}, cross-validation: ${p.crossValidationScore.toFixed(2)})`)
+      .map((p, i) => {
+        const sourceRefs = p.sources?.slice(0, 3).map(s => `[${s.sourceName}]`).join(", ") || "No sources";
+        return `[${patternIds[i]}] ${p.title}: ${p.description}
+  Sources: ${sourceRefs}
+  Confidence: ${p.confidence.toFixed(2)}, Cross-validation: ${p.crossValidationScore.toFixed(2)}`;
+      })
       .join("\n\n");
 
     const prompt = `Synthesize actionable issues from these validated patterns.
@@ -1010,13 +1040,15 @@ ${patternSummaries}
 
 Based on these patterns, identify up to ${context.maxIssues} distinct issues. Prioritize patterns with higher confidence and cross-validation scores.
 
+IMPORTANT: Ground all claims in the source evidence. The keyNumber should cite a specific source. The summary should reference specific findings from sources.
+
 For each issue provide:
 1. Clear, actionable title
-2. Comprehensive summary
+2. Comprehensive summary (MUST reference specific sources, e.g., "According to [Source Name], ...")
 3. Short headline (one sentence)
-4. Why this matters NOW
-5. Key statistic/number
-6. Root causes
+4. Why this matters NOW (cite recent data/findings)
+5. Key statistic/number (MUST include source attribution, e.g., "500K affected [World Bank, 2024]")
+6. Root causes (grounded in evidence)
 7. Affected domains
 8. Leverage points
 9. Time horizon (months/years/decades)
@@ -1220,6 +1252,29 @@ Respond in JSON:
     return savedIds;
   }
 
+  /**
+   * Run epistemological validation on issues (causal analysis, adversarial validation, predictions)
+   * This is optional and can be expensive (multiple LLM calls per issue)
+   */
+  private async runEpistemologicalValidation(issueIds: string[]): Promise<void> {
+    const validationService = new EpistemologicalValidationService();
+
+    for (const issueId of issueIds) {
+      try {
+        console.log(`[Discovery] Running epistemological validation for issue ${issueId}...`);
+        const result = await validationService.validateIssue(issueId);
+        console.log(`[Discovery] Epistemological validation complete for ${issueId}:`);
+        console.log(`  - Causal claims: ${result.causalAnalysis.claims.length}`);
+        console.log(`  - Challenges: ${result.adversarialValidation.challenges.length}`);
+        console.log(`  - Predictions: ${result.predictions.predictions.length}`);
+        console.log(`  - Validation score: ${(result.validationScore * 100).toFixed(1)}%`);
+      } catch (validationError) {
+        console.error(`[Discovery] Epistemological validation failed for issue ${issueId}:`, validationError);
+        // Don't fail the whole process if validation fails
+      }
+    }
+  }
+
   // ============================================================================
   // Verification & Solutions (reuse from original with minor updates)
   // ============================================================================
@@ -1405,7 +1460,12 @@ Respond in JSON:
   }
 
   private async generateSolutions(issue: IssueRow): Promise<GeneratedSolution[]> {
-    const prompt = `Generate actionable solutions for this issue.
+    // Build source context for grounded solutions
+    const sourcesContext = issue.sources?.slice(0, 5).map(s =>
+      `- ${s.sourceName}: "${s.excerpt || s.itemTitle}" (${s.itemUrl})`
+    ).join("\n") || "No sources available";
+
+    const prompt = `Generate actionable solutions for this issue, grounded in the available evidence.
 
 ISSUE:
 Title: ${issue.title}
@@ -1416,6 +1476,9 @@ Key Number: ${issue.keyNumber || "Not specified"}
 Root Causes: ${issue.rootCauses.join(", ")}
 Leverage Points: ${issue.leveragePoints.join(", ")}
 Scores: Impact=${issue.scoreImpact}, Urgency=${issue.scoreUrgency}, Tractability=${issue.scoreTractability}
+
+SOURCES (ground your solutions in this evidence):
+${sourcesContext}
 
 Generate 1-2 concrete solutions with:
 1. Title and summary

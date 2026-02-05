@@ -8,7 +8,7 @@
 
 import { program } from "commander";
 import { z } from "zod";
-import { getDatabase, PatternRepository, IssueRepository, SolutionRepository, ProblemBriefRepository, SituationModelRepository } from "@orbit/db";
+import { getDatabase, PatternRepository, IssueRepository, SolutionRepository, ProblemBriefRepository, SituationModelRepository, CausalClaimRepository, SolutionOutcomeRepository } from "@orbit/db";
 import { getLLMClient } from "@orbit/llm";
 import crypto from "crypto";
 
@@ -80,6 +80,8 @@ program
     const solutionRepo = new SolutionRepository(db);
     const briefRepo = new ProblemBriefRepository(db);
     const situationRepo = new SituationModelRepository(db);
+    const causalClaimRepo = new CausalClaimRepository(db);
+    const outcomeRepo = new SolutionOutcomeRepository(db);
     const llm = getLLMClient();
 
     // Get issues to plan for
@@ -154,9 +156,45 @@ program
       // Get situation model if brief exists
       const situation = brief ? await situationRepo.findByProblemBriefId(brief.id) : null;
 
+      // Get validated causal claims for this issue (prior evidence)
+      const causalClaims = await causalClaimRepo.findClaimsByIssue(issue.id);
+      const validatedClaims = causalClaims.filter(c => c.evidenceScore !== null && c.evidenceScore >= 0.5);
+
+      // Get successful solutions from similar issues (by domain overlap)
+      const { data: allSolutions } = await solutionRepo.findMany({ limit: 100 });
+      const completedSolutions = allSolutions.filter(s => s.solutionStatus === "completed");
+      const effectivenessRecords = await Promise.all(
+        completedSolutions.map(async s => {
+          const eff = await outcomeRepo.getEffectiveness(s.id);
+          if (!eff) return null;
+          return { solution: s, effectiveness: eff };
+        })
+      );
+      const successfulSolutions = effectivenessRecords
+        .filter(r => r && r.effectiveness.overallEffectivenessScore !== null && r.effectiveness.overallEffectivenessScore >= 0.6)
+        .map(r => r!);
+
+      // Find solutions from similar issues (domain overlap)
+      const similarSuccessfulSolutions = [];
+      for (const rec of successfulSolutions) {
+        if (!rec.solution.issueId) continue;
+        const linkedIssue = await issueRepo.findById(rec.solution.issueId);
+        if (!linkedIssue) continue;
+        const domainOverlap = linkedIssue.affectedDomains.filter(d => issue.affectedDomains.includes(d));
+        if (domainOverlap.length > 0) {
+          similarSuccessfulSolutions.push({
+            ...rec,
+            linkedIssue,
+            domainOverlap,
+          });
+        }
+      }
+
       if (options.verbose) {
         console.log(`   Brief: ${brief ? "Available" : "Not generated"}`);
         console.log(`   Situation Model: ${situation ? "Available" : "Not generated"}`);
+        console.log(`   Causal Claims: ${causalClaims.length} (${validatedClaims.length} validated)`);
+        console.log(`   Similar Successful Solutions: ${similarSuccessfulSolutions.length}`);
       }
 
       console.log("🤖 Generating solution proposals...\n");
@@ -245,6 +283,35 @@ ${loops.map((l: { name: string; type: string; description: string }) => `- [${l.
         }
       }
 
+      // Build prior evidence context
+      let priorEvidenceContext = "";
+      if (validatedClaims.length > 0) {
+        priorEvidenceContext += `
+## Validated Causal Claims (Prior Evidence)
+
+These causal relationships have been validated and should inform your solution design:
+${validatedClaims.slice(0, 5).map(c => `- **${c.cause}** → **${c.effect}** (${(c.confidence * 100).toFixed(0)}% confidence, ${c.evidenceStrength} evidence)
+  Mechanism: ${c.mechanism || "Not specified"}${c.hillCriteria ? `
+  Hill Criteria Score: ${(c.hillCriteria.overallScore / 5 * 100).toFixed(0)}%` : ""}`).join("\n")}
+`;
+      }
+
+      if (similarSuccessfulSolutions.length > 0) {
+        priorEvidenceContext += `
+## Successful Prior Solutions (What Has Worked)
+
+Solutions that worked for similar issues (${(similarSuccessfulSolutions[0].effectiveness.overallEffectivenessScore! * 100).toFixed(0)}%+ effectiveness):
+${similarSuccessfulSolutions.slice(0, 3).map(rec => `- **${rec.solution.title}** (${(rec.effectiveness.overallEffectivenessScore! * 100).toFixed(0)}% effective)
+  Type: ${rec.solution.solutionType}
+  Similar domains: ${rec.domainOverlap.join(", ")}
+  Original issue: ${rec.linkedIssue.title}
+  Mechanism: ${rec.solution.mechanism.slice(0, 100)}...${rec.effectiveness.metricsAchieved > 0 ? `
+  Achieved ${rec.effectiveness.metricsAchieved} of ${rec.effectiveness.metricsAchieved + rec.effectiveness.metricsMissed + rec.effectiveness.metricsPartial} metrics` : ""}`).join("\n")}
+
+Consider adapting successful patterns from these solutions.
+`;
+      }
+
       const userPrompt = `Design ${options.maxSolutions} distinct solution proposals for this issue:
 
 ## Issue: ${issue.title}
@@ -266,10 +333,12 @@ ${patternsContext}
 - Impact: ${(issue.scoreImpact * 100).toFixed(0)}%
 - Urgency: ${(issue.scoreUrgency * 100).toFixed(0)}%
 - Tractability: ${(issue.scoreTractability * 100).toFixed(0)}%
-${briefContext}${situationContext}
+${briefContext}${situationContext}${priorEvidenceContext}
 **Instructions**:
 ${brief ? "Use the problem brief goals, constraints, and action space to guide solution design." : "No problem brief available - focus on root causes and leverage points."}
 ${situation ? "Incorporate the situation model insights and leverage points into your solutions." : ""}
+${validatedClaims.length > 0 ? "Ground your solutions in the validated causal claims - target the causal mechanisms identified." : ""}
+${similarSuccessfulSolutions.length > 0 ? "Learn from prior successful solutions - adapt patterns that worked for similar issues." : ""}
 
 For each solution:
 1. Clear title and concise summary

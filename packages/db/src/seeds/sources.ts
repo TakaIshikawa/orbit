@@ -4,6 +4,15 @@
  * Run with: npx tsx packages/db/src/seeds/sources.ts
  */
 
+import dotenv from "dotenv";
+import path from "path";
+import { fileURLToPath } from "url";
+
+// Load .env from project root
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const envPath = path.resolve(__dirname, "../../../../.env");
+dotenv.config({ path: envPath });
+
 import { getDatabase } from "../client.js";
 import { managedSources, calculateDebiasedScore, calculateOverallCredibility } from "../schema/managed-sources.js";
 import { generateId } from "@orbit/core";

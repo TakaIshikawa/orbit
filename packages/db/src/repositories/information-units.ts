@@ -5,7 +5,7 @@
  * Enables granularity-aware triangulation and cross-validation.
  */
 
-import { eq, and, sql, desc } from "drizzle-orm";
+import { eq, and, sql, desc, inArray, or } from "drizzle-orm";
 import type { Database } from "../client.js";
 import {
   informationUnits,
@@ -372,7 +372,10 @@ export class InformationUnitRepository {
       .select()
       .from(unitComparisons)
       .where(
-        sql`${unitComparisons.unitAId} = ANY(${unitIds}) OR ${unitComparisons.unitBId} = ANY(${unitIds})`
+        or(
+          inArray(unitComparisons.unitAId, unitIds),
+          inArray(unitComparisons.unitBId, unitIds)
+        )
       );
 
     const agreements = comparisons.filter((c: UnitComparisonRow) => c.relationship === "agrees").length;

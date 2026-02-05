@@ -60,9 +60,19 @@ export interface FetchOptions {
 export { ArxivFetcher } from './arxiv.js';
 export { OWIDFetcher } from './owid.js';
 export { RSSFetcher } from './rss.js';
+// Phase 1: Priority Data Sources
 export { WorldBankFetcher } from './world-bank.js';
 export { WHOFetcher } from './who.js';
 export { CochraneFetcher } from './cochrane.js';
 export { ReutersFetcher } from './reuters.js';
+// Phase 2: Research Sources
+export { PubMedFetcher } from './pubmed.js';
+export { NBERFetcher } from './nber.js';
+export { ThinkTankFetcher } from './think-tanks.js';
+// Phase 3: Fact-Checkers
+export { FactCheckerFetcher } from './fact-checkers.js';
+// Phase 5: Government Data
+export { GovernmentDataFetcher } from './government-data.js';
+
 export { SourceFetcherRegistry } from './registry.js';
 export { SemanticScholarEnricher, getSemanticScholarEnricher } from './semantic-scholar.js';

@@ -9,10 +9,19 @@ import type { SourceFetcher, FetchedContent, FetchOptions } from './index.js';
 import { ArxivFetcher } from './arxiv.js';
 import { OWIDFetcher } from './owid.js';
 import { RSSFetcher } from './rss.js';
+// Phase 1: Priority Data Sources
 import { WorldBankFetcher } from './world-bank.js';
 import { WHOFetcher } from './who.js';
 import { CochraneFetcher } from './cochrane.js';
 import { ReutersFetcher } from './reuters.js';
+// Phase 2: Research Sources
+import { PubMedFetcher } from './pubmed.js';
+import { NBERFetcher } from './nber.js';
+import { ThinkTankFetcher } from './think-tanks.js';
+// Phase 3: Fact-Checkers
+import { FactCheckerFetcher } from './fact-checkers.js';
+// Phase 5: Government Data
+import { GovernmentDataFetcher } from './government-data.js';
 
 export class SourceFetcherRegistry {
   private fetchers: SourceFetcher[] = [];
@@ -21,13 +30,24 @@ export class SourceFetcherRegistry {
   private constructor() {
     // Register fetchers in priority order (most specific first)
     this.fetchers = [
+      // Existing
       new ArxivFetcher(),
       new OWIDFetcher(),
+      // Phase 1: Priority Data Sources
       new WorldBankFetcher(),
       new WHOFetcher(),
       new CochraneFetcher(),
       new ReutersFetcher(),
-      new RSSFetcher(), // Fallback for generic feeds
+      // Phase 2: Research Sources
+      new PubMedFetcher(),
+      new NBERFetcher(),
+      new ThinkTankFetcher(),
+      // Phase 3: Fact-Checkers
+      new FactCheckerFetcher(),
+      // Phase 5: Government Data
+      new GovernmentDataFetcher(),
+      // Fallback
+      new RSSFetcher(),
     ];
   }
 

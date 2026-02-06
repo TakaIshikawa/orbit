@@ -269,7 +269,7 @@ export class EnhancedDiscoveryExecutor {
 
       // Step 2: Chain-of-thought pattern analysis
       await executionRepo.appendLog(executionId, "info", "Step 2: Analyzing patterns (chain-of-thought)...", 1);
-      const patterns = await this.analyzeWithChainOfThought(fetchedContent, context);
+      const patterns = await this.analyzeWithChainOfThought(fetchedContent, context, executionId);
       await executionRepo.incrementStep(executionId);
       await executionRepo.appendLog(executionId, "info", `Discovered ${patterns.length} patterns`, 1);
 
@@ -543,31 +543,57 @@ export class EnhancedDiscoveryExecutor {
 
   private async analyzeWithChainOfThought(
     fetchedContent: FetchedContent[],
-    context: DiscoveryContext
+    context: DiscoveryContext,
+    executionId?: string
   ): Promise<DiscoveredPattern[]> {
+    const db = getDatabase();
+    const executionRepo = new PlaybookExecutionRepository(db);
+    const log = async (msg: string) => {
+      console.log(`[CoT] ${msg}`);
+      if (executionId) {
+        await executionRepo.appendLog(executionId, "info", `[CoT] ${msg}`, 1);
+      }
+    };
+
     // Step 2a: Extract claims from each source
-    console.log("[CoT] Step 2a: Extracting claims from sources...");
+    await log("Step 2a: Extracting claims from sources...");
     const allClaims = await this.extractClaimsFromSources(fetchedContent);
-    console.log(`[CoT] Extracted ${allClaims.length} claims`);
+    await log(`Extracted ${allClaims.length} claims from ${fetchedContent.length} sources`);
+
+    if (allClaims.length === 0) {
+      await log("No claims extracted - check source content quality");
+      return [];
+    }
 
     // Step 2b: Cluster related claims
-    console.log("[CoT] Step 2b: Clustering related claims...");
+    await log("Step 2b: Clustering related claims...");
     const clusters = await this.clusterClaims(allClaims);
-    console.log(`[CoT] Created ${clusters.length} claim clusters`);
+    await log(`Created ${clusters.length} claim clusters`);
+
+    if (clusters.length === 0) {
+      await log("No clusters formed - claims may be too diverse");
+      return [];
+    }
 
     // Step 2c: Generate patterns from clusters (with self-consistency)
-    console.log("[CoT] Step 2c: Generating patterns with self-consistency...");
+    await log("Step 2c: Generating patterns with self-consistency...");
     const patterns = await this.generatePatternsWithSelfConsistency(clusters, context);
-    console.log(`[CoT] Generated ${patterns.length} patterns`);
+    await log(`Generated ${patterns.length} patterns`);
+
+    if (patterns.length === 0) {
+      await log("No patterns generated from clusters");
+      return [];
+    }
 
     // Step 2d: Critique and refine patterns
-    console.log("[CoT] Step 2d: Critiquing and refining patterns...");
+    await log("Step 2d: Critiquing and refining patterns...");
     const refinedPatterns = await this.critiqueAndRefinePatterns(patterns, allClaims);
-    console.log(`[CoT] Refined to ${refinedPatterns.length} patterns`);
+    await log(`Refined to ${refinedPatterns.length} patterns`);
 
     // Step 2e: Cross-validate patterns
-    console.log("[CoT] Step 2e: Cross-validating patterns...");
+    await log("Step 2e: Cross-validating patterns...");
     const validatedPatterns = this.crossValidatePatterns(refinedPatterns, allClaims);
+    await log(`Validated ${validatedPatterns.length} patterns (${refinedPatterns.length - validatedPatterns.length} filtered)`);
 
     return validatedPatterns;
   }

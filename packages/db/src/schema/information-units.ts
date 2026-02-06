@@ -1,4 +1,4 @@
-import { jsonb, pgEnum, pgTable, text, timestamp, real, integer } from "drizzle-orm/pg-core";
+import { jsonb, pgEnum, pgTable, text, timestamp, real, integer, boolean } from "drizzle-orm/pg-core";
 import { issues } from "./issues.js";
 
 /**
@@ -125,6 +125,11 @@ export const informationUnits = pgTable("information_units", {
   issueId: text("issue_id").references(() => issues.id),
   parentUnitId: text("parent_unit_id"), // Higher-level unit this supports/derives from
   derivedFromUnits: jsonb("derived_from_units").$type<string[]>().default([]), // Lower-level units this is based on
+
+  // Knowledge base fields (for cross-issue reuse)
+  crossIssueComparisonCount: integer("cross_issue_comparison_count").default(0),
+  kbValidated: boolean("kb_validated").default(false),
+  lastUsedForValidation: timestamp("last_used_for_validation", { withTimezone: true }),
 });
 
 // Cross-validation comparisons between units at the same granularity
@@ -209,9 +214,46 @@ export const claimConsistency = pgTable("claim_consistency", {
   updateRationale: text("update_rationale"),
 });
 
+// Cross-issue comparisons for knowledge base validation
+export const crossIssueComparisons = pgTable("cross_issue_comparisons", {
+  id: text("id").primaryKey(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+
+  // The new unit being validated
+  newUnitId: text("new_unit_id").notNull().references(() => informationUnits.id, { onDelete: "cascade" }),
+  newUnitIssueId: text("new_unit_issue_id").notNull(),
+
+  // The historical unit used as evidence
+  historicalUnitId: text("historical_unit_id").notNull().references(() => informationUnits.id, { onDelete: "cascade" }),
+  historicalUnitIssueId: text("historical_unit_issue_id").notNull(),
+
+  // Comparison results
+  relationship: text("relationship").notNull(), // 'supports', 'contradicts', 'refines', 'unrelated'
+  similarityScore: real("similarity_score").notNull(), // 0-1, how similar the claims are
+  relevanceScore: real("relevance_score").notNull(), // 0-1, how relevant for validation
+
+  // Domain/concept overlap
+  domainOverlap: jsonb("domain_overlap").$type<string[]>().default([]),
+  conceptOverlap: jsonb("concept_overlap").$type<string[]>().default([]),
+
+  // Confidence impact
+  confidenceImpact: real("confidence_impact").notNull(), // How much this comparison affects confidence
+  impactExplanation: text("impact_explanation"),
+
+  // Falsifiability weighting
+  historicalUnitFalsifiability: real("historical_unit_falsifiability").notNull(),
+  falsifiabilityWeight: real("falsifiability_weight").notNull(), // Higher falsifiability = more weight
+
+  // Temporal considerations
+  temporalRelevance: text("temporal_relevance"), // 'current', 'outdated', 'historical'
+  temporalNote: text("temporal_note"),
+});
+
 export type InformationUnitRow = typeof informationUnits.$inferSelect;
 export type NewInformationUnitRow = typeof informationUnits.$inferInsert;
 export type UnitComparisonRow = typeof unitComparisons.$inferSelect;
 export type NewUnitComparisonRow = typeof unitComparisons.$inferInsert;
 export type ClaimConsistencyRow = typeof claimConsistency.$inferSelect;
 export type NewClaimConsistencyRow = typeof claimConsistency.$inferInsert;
+export type CrossIssueComparisonRow = typeof crossIssueComparisons.$inferSelect;
+export type NewCrossIssueComparisonRow = typeof crossIssueComparisons.$inferInsert;

@@ -38,6 +38,7 @@ import { dashboardRoutes } from "./routes/dashboard.js";
 import { discoveryRoutes } from "./routes/discovery.js";
 import { validationRoutes } from "./routes/validation.js";
 import informationUnitsRoutes from "./routes/information-units.js";
+import { knowledgeBaseRoutes } from "./routes/knowledge-base.js";
 import { setupWebSocket } from "./events/index.js";
 import { startEnhancedDiscoveryExecutor } from "./services/enhanced-discovery-executor.js";
 
@@ -68,6 +69,7 @@ app.route("/dashboard", dashboardRoutes);
 app.route("/discovery", discoveryRoutes);
 app.route("/validation", validationRoutes);
 app.route("/information-units", informationUnitsRoutes);
+app.route("/knowledge-base", knowledgeBaseRoutes);
 
 // 404 handler
 app.notFound((c) => {

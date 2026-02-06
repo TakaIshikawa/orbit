@@ -11,12 +11,15 @@ import {
   informationUnits,
   unitComparisons,
   claimConsistency,
+  crossIssueComparisons,
   type InformationUnitRow,
   type NewInformationUnitRow,
   type UnitComparisonRow,
   type NewUnitComparisonRow,
   type ClaimConsistencyRow,
   type NewClaimConsistencyRow,
+  type CrossIssueComparisonRow,
+  type NewCrossIssueComparisonRow,
 } from "../schema/information-units.js";
 import { generateId } from "@orbit/core";
 import crypto from "crypto";
@@ -66,6 +69,19 @@ export class InformationUnitRepository {
       .from(informationUnits)
       .where(eq(informationUnits.id, id))
       .limit(1);
+
+    return row || null;
+  }
+
+  async update(
+    id: string,
+    data: Partial<Omit<NewInformationUnitRow, "id" | "statementHash" | "createdAt">>
+  ): Promise<InformationUnitRow | null> {
+    const [row] = await this.db
+      .update(informationUnits)
+      .set({ ...data, updatedAt: new Date() })
+      .where(eq(informationUnits.id, id))
+      .returning();
 
     return row || null;
   }
@@ -392,6 +408,310 @@ export class InformationUnitRepository {
       avgAgreementScore,
     };
   }
+
+  // ============================================================================
+  // Knowledge Base Methods (Cross-Issue Queries)
+  // ============================================================================
+
+  /**
+   * Find high-falsifiability units that can serve as evidence
+   * These are the most reusable units (data_point, observation, statistical)
+   */
+  async findHighFalsifiabilityUnits(options: {
+    minFalsifiability?: number;
+    domains?: string[];
+    excludeIssueId?: string;
+    limit?: number;
+  } = {}): Promise<InformationUnitRow[]> {
+    const { minFalsifiability = 0.7, domains, excludeIssueId, limit = 100 } = options;
+
+    let query = this.db
+      .select()
+      .from(informationUnits)
+      .where(sql`${informationUnits.falsifiabilityScore} >= ${minFalsifiability}`)
+      .orderBy(desc(informationUnits.falsifiabilityScore), desc(informationUnits.currentConfidence))
+      .limit(limit);
+
+    const results = await query;
+
+    // Filter by domains and exclude issue in JS (JSONB array overlap is complex in Drizzle)
+    return results.filter((unit: InformationUnitRow) => {
+      if (excludeIssueId && unit.issueId === excludeIssueId) return false;
+      if (domains && domains.length > 0) {
+        const unitDomains = unit.domains as string[];
+        const hasOverlap = domains.some((d) => unitDomains.includes(d));
+        if (!hasOverlap) return false;
+      }
+      return true;
+    });
+  }
+
+  /**
+   * Find units with overlapping domains and concepts
+   * Used to find relevant historical units for comparison
+   */
+  async findByDomainsAndConcepts(options: {
+    domains: string[];
+    concepts?: string[];
+    minFalsifiability?: number;
+    excludeIssueId?: string;
+    excludeUnitIds?: string[];
+    limit?: number;
+  }): Promise<InformationUnitRow[]> {
+    const { domains, concepts = [], minFalsifiability = 0.5, excludeIssueId, excludeUnitIds = [], limit = 50 } = options;
+
+    // Get all high-falsifiability units first
+    const allUnits = await this.db
+      .select()
+      .from(informationUnits)
+      .where(sql`${informationUnits.falsifiabilityScore} >= ${minFalsifiability}`)
+      .orderBy(desc(informationUnits.falsifiabilityScore), desc(informationUnits.createdAt))
+      .limit(500); // Get more than needed, then filter
+
+    // Score and filter by domain/concept overlap
+    const scored = allUnits
+      .filter((unit: InformationUnitRow) => {
+        if (excludeIssueId && unit.issueId === excludeIssueId) return false;
+        if (excludeUnitIds.includes(unit.id)) return false;
+        return true;
+      })
+      .map((unit: InformationUnitRow) => {
+        const unitDomains = unit.domains as string[];
+        const unitConcepts = unit.concepts as string[];
+
+        // Calculate overlap scores
+        const domainOverlap = domains.filter((d) => unitDomains.includes(d));
+        const conceptOverlap = concepts.filter((c) => unitConcepts.includes(c));
+
+        const domainScore = domainOverlap.length / Math.max(domains.length, 1);
+        const conceptScore = concepts.length > 0 ? conceptOverlap.length / concepts.length : 0;
+
+        // Combined relevance score (domains matter more than concepts)
+        const relevanceScore = domainScore * 0.6 + conceptScore * 0.4;
+
+        return { unit, relevanceScore, domainOverlap, conceptOverlap };
+      })
+      .filter(({ relevanceScore }) => relevanceScore > 0.1) // Must have some overlap
+      .sort((a, b) => {
+        // Sort by: falsifiability * relevance (high falsifiability + high relevance = best)
+        const scoreA = a.unit.falsifiabilityScore * (0.5 + a.relevanceScore * 0.5);
+        const scoreB = b.unit.falsifiabilityScore * (0.5 + b.relevanceScore * 0.5);
+        return scoreB - scoreA;
+      })
+      .slice(0, limit);
+
+    return scored.map(({ unit }) => unit);
+  }
+
+  /**
+   * Find relevant historical units for validating a new unit
+   * Prioritizes high-falsifiability units with domain overlap
+   */
+  async findRelevantHistoricalUnits(
+    newUnit: InformationUnitRow,
+    options: { limit?: number; minFalsifiability?: number } = {}
+  ): Promise<Array<{ unit: InformationUnitRow; relevanceScore: number; domainOverlap: string[]; conceptOverlap: string[] }>> {
+    const { limit = 20, minFalsifiability = 0.6 } = options;
+    const domains = newUnit.domains as string[];
+    const concepts = newUnit.concepts as string[];
+
+    // Get candidate units
+    const candidates = await this.db
+      .select()
+      .from(informationUnits)
+      .where(sql`${informationUnits.falsifiabilityScore} >= ${minFalsifiability}`)
+      .orderBy(desc(informationUnits.falsifiabilityScore), desc(informationUnits.currentConfidence))
+      .limit(500);
+
+    // Score each candidate
+    const scored = candidates
+      .filter((unit: InformationUnitRow) => {
+        // Exclude same unit and same issue
+        if (unit.id === newUnit.id) return false;
+        if (unit.issueId === newUnit.issueId) return false;
+        return true;
+      })
+      .map((unit: InformationUnitRow) => {
+        const unitDomains = unit.domains as string[];
+        const unitConcepts = unit.concepts as string[];
+
+        const domainOverlap = domains.filter((d) => unitDomains.includes(d));
+        const conceptOverlap = concepts.filter((c) => unitConcepts.includes(c));
+
+        // Relevance based on overlap
+        const domainScore = domainOverlap.length / Math.max(domains.length, unitDomains.length, 1);
+        const conceptScore = concepts.length > 0 && unitConcepts.length > 0
+          ? conceptOverlap.length / Math.max(concepts.length, unitConcepts.length)
+          : 0;
+
+        // Temporal relevance (recent units more relevant)
+        const ageInDays = (Date.now() - new Date(unit.createdAt).getTime()) / (1000 * 60 * 60 * 24);
+        const recencyScore = Math.max(0, 1 - ageInDays / 365); // Decay over a year
+
+        // Granularity match bonus (same level or adjacent)
+        const levelOrder = ["paradigm", "theory", "mechanism", "causal_claim", "statistical", "observation", "data_point"];
+        const newLevel = levelOrder.indexOf(newUnit.granularityLevel);
+        const unitLevel = levelOrder.indexOf(unit.granularityLevel);
+        const levelDiff = Math.abs(newLevel - unitLevel);
+        const granularityScore = levelDiff <= 1 ? 1 : levelDiff <= 2 ? 0.7 : 0.4;
+
+        // Combined relevance score
+        const relevanceScore =
+          domainScore * 0.35 +
+          conceptScore * 0.25 +
+          recencyScore * 0.15 +
+          granularityScore * 0.15 +
+          unit.falsifiabilityScore * 0.1;
+
+        return { unit, relevanceScore, domainOverlap, conceptOverlap };
+      })
+      .filter(({ relevanceScore, domainOverlap }) => relevanceScore > 0.15 && domainOverlap.length > 0)
+      .sort((a, b) => b.relevanceScore - a.relevanceScore)
+      .slice(0, limit);
+
+    return scored;
+  }
+
+  // ============================================================================
+  // Cross-Issue Comparisons
+  // ============================================================================
+
+  /**
+   * Create a cross-issue comparison record
+   */
+  async createCrossIssueComparison(
+    data: Omit<NewCrossIssueComparisonRow, "id">
+  ): Promise<CrossIssueComparisonRow> {
+    const id = generateId("xic");
+
+    const [row] = await this.db
+      .insert(crossIssueComparisons)
+      .values({ ...data, id })
+      .returning();
+
+    return row;
+  }
+
+  /**
+   * Get cross-issue comparisons for a unit
+   */
+  async findCrossIssueComparisons(unitId: string): Promise<CrossIssueComparisonRow[]> {
+    return this.db
+      .select()
+      .from(crossIssueComparisons)
+      .where(
+        or(
+          eq(crossIssueComparisons.newUnitId, unitId),
+          eq(crossIssueComparisons.historicalUnitId, unitId)
+        )
+      )
+      .orderBy(desc(crossIssueComparisons.createdAt));
+  }
+
+  /**
+   * Get cross-issue comparison stats for an issue
+   */
+  async getCrossIssueComparisonStats(issueId: string): Promise<{
+    totalComparisons: number;
+    supportingCount: number;
+    contradictingCount: number;
+    avgConfidenceImpact: number;
+  }> {
+    const comparisons = await this.db
+      .select()
+      .from(crossIssueComparisons)
+      .where(eq(crossIssueComparisons.newUnitIssueId, issueId));
+
+    const supportingCount = comparisons.filter((c: CrossIssueComparisonRow) => c.relationship === "supports").length;
+    const contradictingCount = comparisons.filter((c: CrossIssueComparisonRow) => c.relationship === "contradicts").length;
+    const avgConfidenceImpact = comparisons.length > 0
+      ? comparisons.reduce((sum: number, c: CrossIssueComparisonRow) => sum + c.confidenceImpact, 0) / comparisons.length
+      : 0;
+
+    return {
+      totalComparisons: comparisons.length,
+      supportingCount,
+      contradictingCount,
+      avgConfidenceImpact,
+    };
+  }
+
+  /**
+   * Update a unit's knowledge base validation stats
+   */
+  async updateKnowledgeBaseStats(
+    unitId: string,
+    updates: { incrementComparisonCount?: boolean; markValidated?: boolean }
+  ): Promise<void> {
+    const setClauses: Record<string, unknown> = {
+      lastUsedForValidation: new Date(),
+    };
+
+    if (updates.markValidated) {
+      setClauses.kbValidated = true;
+    }
+
+    await this.db
+      .update(informationUnits)
+      .set(setClauses)
+      .where(eq(informationUnits.id, unitId));
+
+    if (updates.incrementComparisonCount) {
+      await this.db.execute(
+        sql`UPDATE information_units SET cross_issue_comparison_count = cross_issue_comparison_count + 1 WHERE id = ${unitId}`
+      );
+    }
+  }
+
+  /**
+   * Get knowledge base statistics
+   */
+  async getKnowledgeBaseStats(): Promise<{
+    totalUnits: number;
+    highFalsifiabilityUnits: number;
+    validatedUnits: number;
+    totalCrossIssueComparisons: number;
+    unitsByGranularity: Record<string, number>;
+  }> {
+    const [totalResult] = await this.db
+      .select({ count: sql<number>`count(*)::int` })
+      .from(informationUnits);
+
+    const [highFalsResult] = await this.db
+      .select({ count: sql<number>`count(*)::int` })
+      .from(informationUnits)
+      .where(sql`${informationUnits.falsifiabilityScore} >= 0.7`);
+
+    const [validatedResult] = await this.db
+      .select({ count: sql<number>`count(*)::int` })
+      .from(informationUnits)
+      .where(eq(informationUnits.kbValidated, true));
+
+    const [crossIssueResult] = await this.db
+      .select({ count: sql<number>`count(*)::int` })
+      .from(crossIssueComparisons);
+
+    const granularityResults = await this.db
+      .select({
+        level: informationUnits.granularityLevel,
+        count: sql<number>`count(*)::int`,
+      })
+      .from(informationUnits)
+      .groupBy(informationUnits.granularityLevel);
+
+    const unitsByGranularity: Record<string, number> = {};
+    for (const r of granularityResults) {
+      unitsByGranularity[r.level] = r.count;
+    }
+
+    return {
+      totalUnits: totalResult.count,
+      highFalsifiabilityUnits: highFalsResult.count,
+      validatedUnits: validatedResult.count,
+      totalCrossIssueComparisons: crossIssueResult.count,
+      unitsByGranularity,
+    };
+  }
 }
 
-export type { InformationUnitRow, NewInformationUnitRow, UnitComparisonRow, ClaimConsistencyRow };
+export type { InformationUnitRow, NewInformationUnitRow, UnitComparisonRow, ClaimConsistencyRow, CrossIssueComparisonRow };

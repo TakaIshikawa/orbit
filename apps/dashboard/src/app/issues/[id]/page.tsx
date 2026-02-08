@@ -717,6 +717,7 @@ function TheEvidenceTab({
 }) {
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [showGranularityDetails, setShowGranularityDetails] = useState(false);
+  const [expandedLevels, setExpandedLevels] = useState<Set<string>>(new Set());
 
   if (isLoading) {
     return <div className="animate-pulse text-gray-400">Loading evidence...</div>;
@@ -817,31 +818,96 @@ function TheEvidenceTab({
               <div className="space-y-2">
                 {informationUnitsSummary.granularityBreakdown
                   .filter(level => level.unitCount > 0)
-                  .map((level) => (
-                    <div key={level.level} className="flex items-center gap-3">
-                      <div className="w-28 text-sm text-gray-400">{level.name}</div>
-                      <div className="flex-1 h-4 bg-gray-800 rounded-full overflow-hidden">
-                        <div
-                          className="h-full bg-gradient-to-r from-cyan-600 to-cyan-400 rounded-full"
-                          style={{
-                            width: `${(level.unitCount / informationUnitsSummary.totalUnits) * 100}%`,
+                  .map((level) => {
+                    const isExpanded = expandedLevels.has(level.level);
+                    const hasSamples = level.sampleUnits && level.sampleUnits.length > 0;
+
+                    return (
+                      <div key={level.level} className="border border-gray-800 rounded-lg overflow-hidden">
+                        <button
+                          onClick={() => {
+                            if (hasSamples) {
+                              setExpandedLevels(prev => {
+                                const next = new Set(prev);
+                                if (next.has(level.level)) {
+                                  next.delete(level.level);
+                                } else {
+                                  next.add(level.level);
+                                }
+                                return next;
+                              });
+                            }
                           }}
-                        />
+                          className={`w-full flex items-center gap-3 p-2 ${hasSamples ? "hover:bg-gray-800/30 cursor-pointer" : "cursor-default"}`}
+                        >
+                          <div className="w-28 text-sm text-gray-400 text-left">{level.name}</div>
+                          <div className="flex-1 h-4 bg-gray-800 rounded-full overflow-hidden">
+                            <div
+                              className="h-full bg-gradient-to-r from-cyan-600 to-cyan-400 rounded-full"
+                              style={{
+                                width: `${(level.unitCount / informationUnitsSummary.totalUnits) * 100}%`,
+                              }}
+                            />
+                          </div>
+                          <div className="w-12 text-sm text-right">{level.unitCount}</div>
+                          <div className={`w-12 text-sm text-right ${
+                            level.falsifiability >= 0.7 ? "text-green-400" :
+                            level.falsifiability >= 0.4 ? "text-yellow-400" : "text-red-400"
+                          }`}>
+                            {(level.falsifiability * 100).toFixed(0)}%
+                          </div>
+                          {level.avgConfidence !== null && (
+                            <div className="w-16 text-xs text-gray-500 text-right">
+                              conf: {(level.avgConfidence * 100).toFixed(0)}%
+                            </div>
+                          )}
+                          {hasSamples && (
+                            <span className={`text-gray-500 text-xs transition-transform ${isExpanded ? "rotate-180" : ""}`}>
+                              ▼
+                            </span>
+                          )}
+                        </button>
+
+                        {isExpanded && hasSamples && (
+                          <div className="border-t border-gray-800 bg-gray-900/50 p-3 space-y-3">
+                            <div className="text-xs text-gray-500 mb-2">
+                              {level.description} • Showing {level.sampleUnits.length} of {level.unitCount} units
+                            </div>
+                            {level.sampleUnits.map((unit) => (
+                              <div key={unit.id} className="bg-gray-800/50 rounded p-3 space-y-2">
+                                <p className="text-sm text-gray-200">{unit.statement}</p>
+                                <div className="flex flex-wrap items-center gap-2 text-xs">
+                                  <span className="px-2 py-0.5 bg-gray-700 rounded text-gray-300">
+                                    {unit.sourceName}
+                                  </span>
+                                  <span className={`px-2 py-0.5 rounded ${
+                                    unit.currentConfidence >= 0.7 ? "bg-green-900/50 text-green-300" :
+                                    unit.currentConfidence >= 0.4 ? "bg-yellow-900/50 text-yellow-300" : "bg-red-900/50 text-red-300"
+                                  }`}>
+                                    {(unit.currentConfidence * 100).toFixed(0)}% confidence
+                                  </span>
+                                  <span className="text-gray-500">
+                                    {unit.temporalScope} • {unit.spatialScope}
+                                  </span>
+                                  {unit.domains && (unit.domains as string[]).length > 0 && (
+                                    <span className="text-gray-500">
+                                      {(unit.domains as string[]).slice(0, 3).join(", ")}
+                                    </span>
+                                  )}
+                                </div>
+                                {unit.quantitativeData && (unit.quantitativeData as { value?: number; unit?: string }).value !== undefined && (
+                                  <div className="text-xs text-cyan-400">
+                                    Quantitative: {(unit.quantitativeData as { value?: number; unit?: string }).value}
+                                    {(unit.quantitativeData as { value?: number; unit?: string }).unit && ` ${(unit.quantitativeData as { value?: number; unit?: string }).unit}`}
+                                  </div>
+                                )}
+                              </div>
+                            ))}
+                          </div>
+                        )}
                       </div>
-                      <div className="w-12 text-sm text-right">{level.unitCount}</div>
-                      <div className={`w-12 text-sm text-right ${
-                        level.falsifiability >= 0.7 ? "text-green-400" :
-                        level.falsifiability >= 0.4 ? "text-yellow-400" : "text-red-400"
-                      }`}>
-                        {(level.falsifiability * 100).toFixed(0)}%
-                      </div>
-                      {level.avgConfidence !== null && (
-                        <div className="w-16 text-xs text-gray-500 text-right">
-                          conf: {(level.avgConfidence * 100).toFixed(0)}%
-                        </div>
-                      )}
-                    </div>
-                  ))}
+                    );
+                  })}
               </div>
 
               {/* Falsifiability Legend */}

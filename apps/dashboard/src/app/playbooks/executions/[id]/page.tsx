@@ -51,10 +51,14 @@ export default function ExecutionDetailPage() {
     );
   }
 
-  const execution = data.data;
+  const execution = data.data as PlaybookExecution & { steps: PlaybookStepExecution[] };
 
   // Extract artifacts created during execution
   const artifacts = extractArtifacts(execution);
+
+  // Safely extract context values
+  const ctx = execution.context;
+  const hasContext: boolean = !!(ctx && (ctx.patternId || ctx.issueId || ctx.briefId));
 
   const statusColors: Record<string, string> = {
     pending: "bg-gray-700 text-gray-300",
@@ -129,32 +133,31 @@ export default function ExecutionDetailPage() {
         )}
       </div>
 
-      {/* Context */}
-      {execution.context && Object.keys(execution.context).length > 0 && (
+      {hasContext && (
         <div className="border border-gray-800 rounded-lg p-6">
           <h2 className="text-lg font-semibold mb-4">Context</h2>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
-            {execution.context.patternId && (
+            {ctx.patternId && (
               <div>
                 <span className="text-gray-500">Pattern ID</span>
-                <Link href={`/patterns/${execution.context.patternId}`} className="text-blue-400 hover:underline font-mono text-sm block">
-                  {execution.context.patternId}
+                <Link href={`/patterns/${ctx.patternId}`} className="text-blue-400 hover:underline font-mono text-sm block">
+                  {ctx.patternId}
                 </Link>
               </div>
             )}
-            {execution.context.issueId && (
+            {ctx.issueId && (
               <div>
                 <span className="text-gray-500">Issue ID</span>
-                <Link href={`/issues/${execution.context.issueId}`} className="text-blue-400 hover:underline font-mono text-sm block">
-                  {execution.context.issueId}
+                <Link href={`/issues/${ctx.issueId}`} className="text-blue-400 hover:underline font-mono text-sm block">
+                  {ctx.issueId}
                 </Link>
               </div>
             )}
-            {execution.context.briefId && (
+            {ctx.briefId && (
               <div>
                 <span className="text-gray-500">Brief ID</span>
-                <Link href={`/briefs/${execution.context.briefId}`} className="text-blue-400 hover:underline font-mono text-sm block">
-                  {execution.context.briefId}
+                <Link href={`/briefs/${ctx.briefId}`} className="text-blue-400 hover:underline font-mono text-sm block">
+                  {ctx.briefId}
                 </Link>
               </div>
             )}
@@ -163,7 +166,8 @@ export default function ExecutionDetailPage() {
       )}
 
       {/* Sources Used */}
-      {execution.output?.sourcesUsed && (execution.output.sourcesUsed as SourceUsed[]).length > 0 && (
+      {Array.isArray((execution.output as { sourcesUsed?: unknown })?.sourcesUsed) &&
+       ((execution.output as { sourcesUsed?: SourceUsed[] }).sourcesUsed ?? []).length > 0 && (
         <div className="border border-gray-800 rounded-lg p-6">
           <h2 className="text-lg font-semibold mb-4">Sources Used</h2>
           <div className="space-y-3">

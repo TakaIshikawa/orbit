@@ -7,6 +7,20 @@ import Link from "next/link";
 import { api, type Solution, type Verification, type Issue, type SimpleStatus, type Outcome, type CausalClaim, type AdversarialChallenge, type Prediction, type ValidationSummary, type ChallengeStats, type InformationUnitsSummary } from "@/lib/api";
 import { IssueRelationshipGraph } from "@/components/issue-relationship-graph";
 import { OutcomeRecordingModal } from "@/components/outcome-recording-modal";
+import {
+  AtAGlance,
+  ConfidenceIndicator,
+  SolutionComparison,
+  EvidencePyramid,
+  CallToAction,
+  TimelineView,
+  KeyNumbers,
+  SourceCredibility,
+  ContradictionAlerts,
+  PlainLanguageScores,
+  ReadingTime,
+  ProgressIndicator,
+} from "@/components/issue-ux";
 
 // Placeholder user ID - in production this would come from auth
 const CURRENT_USER_ID = "user_default";
@@ -330,6 +344,24 @@ export default function IssueDetailPage() {
         <p className="text-gray-400">{issue.summary}</p>
       )}
 
+      {/* Reading Time & Progress Indicator */}
+      <div className="flex items-center justify-between">
+        <ReadingTime
+          issue={issue}
+          verificationCount={verifications.length}
+          solutionCount={solutions.length}
+        />
+        <ProgressIndicator
+          activeTab={activeTab}
+          tabs={tabs}
+          hasEvidence={verifications.length > 0}
+          hasValidation={!!validationSummary?.isValidated}
+          hasSolutions={proposedSolutions.length > 0}
+          hasActiveWork={inProgressSolutions.length > 0}
+          hasOutcomes={completedSolutions.length > 0}
+        />
+      </div>
+
       {/* Tabs */}
       <div className="border-b border-gray-800">
         <nav className="flex gap-1">
@@ -355,7 +387,13 @@ export default function IssueDetailPage() {
       {/* Tab Content */}
       <div className="min-h-[400px]">
         {activeTab === "problem" && (
-          <TheProblemTab issue={issue} brief={brief} situation={situation} />
+          <TheProblemTab
+            issue={issue}
+            brief={brief}
+            situation={situation}
+            verifications={verifications}
+            solutions={solutions}
+          />
         )}
         {activeTab === "evidence" && (
           <TheEvidenceTab
@@ -481,45 +519,30 @@ function TheProblemTab({
   issue,
   brief,
   situation,
+  verifications,
+  solutions,
 }: {
   issue: IssueDetail;
   brief?: Brief | null;
   situation?: SituationModel | null;
+  verifications?: Verification[];
+  solutions?: Solution[];
 }) {
   const [showDeepDive, setShowDeepDive] = useState(false);
 
-  // Create human-readable summary of why this matters
-  const urgencyText = issue.scoreUrgency >= 0.7 ? "urgent" : issue.scoreUrgency >= 0.4 ? "moderately urgent" : "not immediately urgent";
-  const tractabilityText = issue.scoreTractability >= 0.7 ? "highly tractable" : issue.scoreTractability >= 0.4 ? "moderately tractable" : "difficult to address";
-  const neglectednessText = issue.scoreNeglectedness >= 0.7 ? "severely neglected" : issue.scoreNeglectedness >= 0.4 ? "somewhat neglected" : "receiving some attention";
-
   return (
     <div className="space-y-6">
-      {/* Layer 2: Understandable Summary */}
-      <div className="border border-gray-800 rounded-lg p-5">
-        <h2 className="font-semibold mb-3 text-lg">Why This Matters</h2>
-        <p className="text-gray-300 mb-4">
-          This issue is <span className="text-white font-medium">{urgencyText}</span>,
-          {" "}<span className="text-white font-medium">{tractabilityText}</span>,
-          and <span className="text-white font-medium">{neglectednessText}</span>.
-        </p>
+      {/* At A Glance - 30 second summary */}
+      <AtAGlance
+        issue={issue}
+        solutionCount={solutions?.length ?? 0}
+      />
 
-        {/* Simple visual indicators */}
-        <div className="flex gap-6 text-sm">
-          <div className="flex items-center gap-2">
-            <span className={`w-3 h-3 rounded-full ${issue.scoreUrgency >= 0.7 ? "bg-red-500" : issue.scoreUrgency >= 0.4 ? "bg-yellow-500" : "bg-green-500"}`} />
-            <span className="text-gray-400">Urgency</span>
-          </div>
-          <div className="flex items-center gap-2">
-            <span className={`w-3 h-3 rounded-full ${issue.scoreTractability >= 0.7 ? "bg-green-500" : issue.scoreTractability >= 0.4 ? "bg-yellow-500" : "bg-red-500"}`} />
-            <span className="text-gray-400">Tractability</span>
-          </div>
-          <div className="flex items-center gap-2">
-            <span className={`w-3 h-3 rounded-full ${issue.scoreNeglectedness >= 0.7 ? "bg-red-500" : issue.scoreNeglectedness >= 0.4 ? "bg-yellow-500" : "bg-green-500"}`} />
-            <span className="text-gray-400">Neglectedness</span>
-          </div>
-        </div>
-      </div>
+      {/* Key Numbers */}
+      <KeyNumbers issue={issue} />
+
+      {/* Plain Language Assessment */}
+      <PlainLanguageScores issue={issue} />
 
       {/* Root Causes */}
       {issue.rootCauses.length > 0 && (
@@ -566,48 +589,9 @@ function TheProblemTab({
         </div>
       )}
 
-      {/* Sources */}
+      {/* Source Credibility */}
       {issue.sources && issue.sources.length > 0 && (
-        <div className="border border-blue-900/50 rounded-lg p-4">
-          <h2 className="font-semibold text-blue-300 mb-3">Sources ({issue.sources.length})</h2>
-          <div className="space-y-3">
-            {issue.sources.map((source, i) => (
-              <div key={i} className="bg-gray-800/50 rounded-lg p-3">
-                <div className="flex items-start justify-between gap-3">
-                  <div className="flex-1 min-w-0">
-                    <a
-                      href={source.itemUrl}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="text-sm font-medium text-blue-400 hover:text-blue-300 hover:underline"
-                    >
-                      {source.itemTitle}
-                    </a>
-                    <p className="text-xs text-gray-500 mt-0.5">
-                      via <span className="text-gray-400">{source.sourceName}</span>
-                    </p>
-                    {source.excerpt && (
-                      <p className="text-sm text-gray-400 mt-2 italic border-l-2 border-gray-700 pl-2">
-                        "{source.excerpt}"
-                      </p>
-                    )}
-                  </div>
-                  {source.credibility !== undefined && (
-                    <div className="text-right shrink-0">
-                      <div className={`text-sm font-medium ${
-                        source.credibility >= 0.7 ? "text-green-400" :
-                        source.credibility >= 0.4 ? "text-yellow-400" : "text-red-400"
-                      }`}>
-                        {(source.credibility * 100).toFixed(0)}%
-                      </div>
-                      <div className="text-xs text-gray-500">credibility</div>
-                    </div>
-                  )}
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
+        <SourceCredibility sources={issue.sources} />
       )}
 
       {/* Layer 3: Deep Dive (Collapsible) */}
@@ -751,7 +735,42 @@ function TheEvidenceTab({
 
   return (
     <div className="space-y-4">
-      {/* Summary */}
+      {/* Confidence Indicator - overall assessment */}
+      {verifications.length > 0 && (
+        <ConfidenceIndicator
+          confidence={avgConfidence}
+          sourceCount={verifications.length}
+          agreementCount={corroborated}
+          contradictionCount={contested}
+        />
+      )}
+
+      {/* Evidence Pyramid - visual hierarchy */}
+      {verifications.length > 0 && (
+        <EvidencePyramid
+          tiers={[
+            { name: "Meta-analyses", count: 0, color: "bg-green-500" },
+            { name: "Primary Research", count: corroborated, color: "bg-cyan-500" },
+            { name: "Expert Opinion", count: partial, color: "bg-yellow-500" },
+            { name: "Contested/Unverified", count: contested + unverified, color: "bg-gray-500" },
+          ]}
+        />
+      )}
+
+      {/* Contradiction Alerts */}
+      {contested > 0 && (
+        <ContradictionAlerts
+          alerts={verifications
+            .filter(v => v.status === "contested")
+            .map(v => ({
+              claim: v.claimStatement,
+              source: v.sourceAssessments[0]?.name || "Unknown",
+              severity: "high" as const,
+            }))}
+        />
+      )}
+
+      {/* Summary Stats */}
       <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
         <div className="border border-gray-800 rounded-lg p-3">
           <div className="text-xl font-bold text-green-400">{corroborated}</div>
@@ -1090,8 +1109,33 @@ function WhatCanBeDoneTab({
     );
   }
 
+  // Find highest-rated solution for call to action
+  const bestSolution = solutions.reduce((best, s) =>
+    ((s.feasibilityScore ?? 0) + (s.impactScore ?? 0)) / 2 >
+    ((best.feasibilityScore ?? 0) + (best.impactScore ?? 0)) / 2
+      ? s : best
+  , solutions[0]);
+
   return (
     <div className="space-y-4">
+      {/* Solution Comparison (when 2+ solutions) */}
+      {solutions.length >= 2 && (
+        <SolutionComparison
+          solutions={solutions}
+          onSelect={(solutionId) => onAssign(solutionId)}
+        />
+      )}
+
+      {/* Call to Action */}
+      <CallToAction
+        hasProposedSolutions={solutions.length > 0}
+        hasInProgressSolutions={false}
+        bestSolutionId={bestSolution?.id}
+        bestSolutionTitle={bestSolution?.title}
+        onTakeAction={(solutionId) => onAssign(solutionId)}
+      />
+
+      {/* Solution Cards */}
       {solutions.map((solution) => {
         const isExpanded = expandedId === solution.id;
         const feasibility = solution.feasibilityScore ?? 0;

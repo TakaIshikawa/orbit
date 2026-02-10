@@ -2120,9 +2120,8 @@ export interface ChallengeStats {
   avgConfidenceImpact: number;
 }
 
-// Type augmentation for ApiClient
-declare module "@/lib/api" {
-  interface ApiClient {
+// Type augmentation for ApiClient - using interface merging
+interface ApiClient {
     // Validation methods
     getCausalClaims(issueId: string): Promise<{ data: CausalClaim[] }>;
     getCausalChains(issueId: string): Promise<{ data: CausalChain[] }>;
@@ -2172,5 +2171,4 @@ declare module "@/lib/api" {
     restoreManagedSource(id: string): Promise<SingleResponse<ManagedSource>>;
     deleteManagedSource(id: string): Promise<{ data: { deleted: boolean; id: string } }>;
     getManagedSourceHistory(id: string, params?: { limit?: number; offset?: number }): Promise<PaginatedResponse<SourceAssessmentHistory>>;
-  }
 }

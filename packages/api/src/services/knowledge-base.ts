@@ -165,18 +165,20 @@ class KnowledgeBaseService {
    */
   async validateIssueUnits(
     issueId: string,
-    options: { maxComparisonsPerUnit?: number; minFalsifiability?: number } = {}
+    options: { maxComparisonsPerUnit?: number; minFalsifiability?: number; maxUnitsPerIssue?: number } = {}
   ): Promise<{
     unitsValidated: number;
     totalComparisons: number;
     netConfidenceImpact: number;
     summary: string;
   }> {
-    const { maxComparisonsPerUnit = 5, minFalsifiability = 0.6 } = options;
+    const { maxComparisonsPerUnit = 5, minFalsifiability = 0.6, maxUnitsPerIssue = 20 } = options;
 
     // Get units for this issue that haven't been KB validated
     const allUnits = await this.unitRepo.findByIssue(issueId);
-    const unvalidatedUnits = allUnits.filter((u) => !u.kbValidated);
+    const unvalidatedUnits = allUnits
+      .filter((u) => !u.kbValidated)
+      .slice(0, maxUnitsPerIssue); // Limit to avoid excessive API calls
 
     if (unvalidatedUnits.length === 0) {
       return {

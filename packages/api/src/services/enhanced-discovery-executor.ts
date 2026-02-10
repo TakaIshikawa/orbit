@@ -359,38 +359,54 @@ export class EnhancedDiscoveryExecutor {
           );
         }
 
-        // Step 4.7: Validate against accumulated knowledge base
-        await executionRepo.appendLog(
-          executionId,
-          "info",
-          "Step 4.7: Validating new units against accumulated knowledge base...",
-          3
-        );
-
+        // Step 4.7: Validate against accumulated knowledge base (OPTIONAL - can be slow)
+        // Skip if insufficient historical data (need at least 50 validated units) to avoid wasted LLM calls
         try {
           const { getKnowledgeBaseService } = await import("./knowledge-base.js");
           const kbService = getKnowledgeBaseService();
+          const kbStats = await kbService.getStats();
 
-          let totalKbComparisons = 0;
-          let totalKbSupport = 0;
-          let totalKbContradictions = 0;
+          // Only run KB validation if we have enough historical data
+          const MIN_HISTORICAL_UNITS = 50;
+          if (kbStats.validatedUnits >= MIN_HISTORICAL_UNITS) {
+            await executionRepo.appendLog(
+              executionId,
+              "info",
+              `Step 4.7: Validating against knowledge base (${kbStats.validatedUnits} historical units)...`,
+              3
+            );
 
-          for (const issue of savedIssues) {
-            const kbResult = await kbService.validateIssueUnits(issue.id, {
-              maxComparisonsPerUnit: 5,
-              minFalsifiability: 0.6,
-            });
-            totalKbComparisons += kbResult.totalComparisons;
-            if (kbResult.netConfidenceImpact > 0) totalKbSupport++;
-            if (kbResult.netConfidenceImpact < 0) totalKbContradictions++;
+            let totalKbComparisons = 0;
+            let totalKbSupport = 0;
+            let totalKbContradictions = 0;
+
+            // Limit to first 3 issues and 2 comparisons per unit to avoid excessive LLM calls
+            const issuesToValidate = savedIssues.slice(0, 3);
+            for (const issue of issuesToValidate) {
+              const kbResult = await kbService.validateIssueUnits(issue.id, {
+                maxComparisonsPerUnit: 2, // Reduced from 5
+                minFalsifiability: 0.7,   // Increased threshold
+                maxUnitsPerIssue: 5,      // Limit units per issue
+              });
+              totalKbComparisons += kbResult.totalComparisons;
+              if (kbResult.netConfidenceImpact > 0) totalKbSupport++;
+              if (kbResult.netConfidenceImpact < 0) totalKbContradictions++;
+            }
+
+            await executionRepo.appendLog(
+              executionId,
+              "info",
+              `Knowledge base validation: ${totalKbComparisons} comparisons, ${totalKbSupport} strengthened, ${totalKbContradictions} weakened`,
+              3
+            );
+          } else {
+            await executionRepo.appendLog(
+              executionId,
+              "info",
+              `Step 4.7: Skipped KB validation (only ${kbStats.validatedUnits}/${MIN_HISTORICAL_UNITS} historical units)`,
+              3
+            );
           }
-
-          await executionRepo.appendLog(
-            executionId,
-            "info",
-            `Knowledge base validation: ${totalKbComparisons} cross-issue comparisons, ${totalKbSupport} issues strengthened, ${totalKbContradictions} issues weakened`,
-            3
-          );
         } catch (kbError) {
           await executionRepo.appendLog(
             executionId,

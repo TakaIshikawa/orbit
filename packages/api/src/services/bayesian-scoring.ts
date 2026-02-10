@@ -624,8 +624,8 @@ export class BayesianScoringService {
       priorBeta,
       posteriorAlpha,
       posteriorBeta,
-      evidenceType: "consistency",
-      evidenceId: null,
+      evidenceType: "verification", // Using verification as proxy for consistency updates
+      evidenceId: undefined,
       evidenceDirection,
       reason,
     });
